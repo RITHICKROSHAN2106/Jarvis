@@ -176,6 +176,48 @@ class SafetyManager:
         except Exception as e:
             return f"System telemetry unavailable: {e}"
 
+    def run_powershell(self, command: str, timeout_seconds: int = 30) -> str:
+        """Run a bounded, non-elevated PowerShell command with policy enforcement."""
+        command = str(command or "").strip()
+        if not command:
+            return "No PowerShell command was provided, boss."
+        if self.is_command_blocked(command):
+            self.log_action("run_powershell", 3, {"command": command}, "BLOCKED", "Command policy violation")
+            return "Action blocked, boss. That command matches a protected or destructive pattern."
+
+        timeout = max(1, min(int(timeout_seconds), 60))
+        try:
+            result = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "RemoteSigned", "-Command", command],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout,
+                check=False,
+                shell=False,
+            )
+            output = (result.stdout or "").strip()
+            error = (result.stderr or "").strip()
+            combined = output if output else error
+            if len(combined) > 4000:
+                combined = combined[:4000] + "\n[output truncated]"
+            status = "EXECUTED" if result.returncode == 0 else "FAILED"
+            self.log_action(
+                "run_powershell",
+                2,
+                {"command": command, "timeout_seconds": timeout},
+                status,
+                f"exit_code={result.returncode}",
+            )
+            return f"PowerShell exit code {result.returncode}:\n{combined or '(no output)'}"
+        except subprocess.TimeoutExpired:
+            self.log_action("run_powershell", 2, {"command": command}, "FAILED", "Timed out")
+            return f"PowerShell command timed out after {timeout} seconds, boss."
+        except OSError as exc:
+            self.log_action("run_powershell", 2, {"command": command}, "FAILED", str(exc))
+            return f"PowerShell could not be started, boss: {exc}"
+
     def execute_tool(
         self,
         action: str,
@@ -211,6 +253,8 @@ class SafetyManager:
             return self.list_dir(args.get("path", "."))
         elif action == "get_system_stats":
             return self.get_system_stats()
+        elif action == "run_powershell":
+            return self.run_powershell(args.get("command", ""), args.get("timeout_seconds", 30))
 
         self.log_action(action, tier, args, "UNKNOWN")
         return f"Unknown tool '{action}', boss."

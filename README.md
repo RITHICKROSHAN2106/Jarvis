@@ -254,3 +254,19 @@ the multilingual `small` model (override with `JARVIS_WHISPER_MODEL`) and also
 auto-detects language. The selected Groq model can be changed with
 `JARVIS_GROQ_STT_MODEL` for accuracy experiments, for example
 `whisper-large-v3`.
+
+## Controlled text-based system access
+
+JARVIS can run approved PowerShell commands through the Tier 2
+`run_powershell` tool. It runs as the normal logged-in user, never silently as
+Administrator, captures output, limits execution to 60 seconds, and writes an
+audit entry to `logs/actions.log`. Destructive or protected commands are
+blocked before execution. A voice request such as “run PowerShell and show my
+disk space” requires confirmation; saying “cancel” denies it.
+
+File deletion remains deliberately safer than raw shell deletion: JARVIS
+requires confirmation and moves files to the Windows Recycle Bin so an undo
+path remains possible. It will not delete Windows, Program Files, Recovery,
+Boot, or other protected system paths. Opening a normal `cmd.exe` window is
+supported through the existing app launcher, but JARVIS does not grant that
+window administrator rights.

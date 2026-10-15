@@ -67,3 +67,7 @@ blocked_command_patterns:
   - "(?i)bcdedit"
   - "(?i)reg\\s+delete"
   - "(?i)wevtutil\\s+cl"
+  - "(?i)(remove-item|ri|del|erase|rd|rmdir)\\b.*(-recurse|-force|/s|/q)"
+  - "(?i)(remove-item|ri|del|erase|rd|rmdir)\\b.*(C:\\\\Windows|C:\\\\Program Files|C:\\\\Recovery|C:\\\\Boot)"
+  - "(?i)(clear-content|set-content|out-file|add-content)\\b.*(C:\\\\Windows|C:\\\\Program Files|C:\\\\Recovery|C:\\\\Boot)"
+  - "(?i)(shutdown|restart-computer|stop-computer|format-volume|clear-disk|diskpart)"
