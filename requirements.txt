@@ -10,4 +10,6 @@ rapidfuzz
 send2trash
 pyyaml
 pyperclip
+edge-tts
+playsound3
 # anthropic   # only needed if you set LLM_PROVIDER = "anthropic" (paid)

@@ -51,6 +51,7 @@ import urllib.parse
 import urllib.request
 import wave
 import webbrowser
+import hashlib
 from collections import deque
 from rapidfuzz import process, fuzz
 
@@ -98,6 +99,7 @@ import numpy as np
 import sounddevice as sd
 import pyautogui
 import pyperclip
+import yaml
 
 pyautogui.FAILSAFE = False
 
@@ -181,7 +183,23 @@ CLAP_RATIO = 6.0                   # ...and this many times louder than backgrou
 CLAP_MIN_GAP = 0.20                # seconds between the two claps (min)
 CLAP_MAX_GAP = 0.80                # seconds between the two claps (max)
 
-VOICE_HINT = "david"               # preferred system voice name ("david", "zira", etc.)
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.yaml")
+try:
+    with open(CONFIG_PATH, "r", encoding="utf-8") as _config_file:
+        _voice_config = (yaml.safe_load(_config_file) or {}).get("voice", {})
+except (OSError, yaml.YAMLError, AttributeError):
+    _voice_config = {}
+
+VOICE_ENGINE = os.environ.get("JARVIS_VOICE_ENGINE", _voice_config.get("engine", "sapi")).lower()
+VOICE_NAME = os.environ.get("JARVIS_VOICE_NAME", _voice_config.get("name", "en-GB-RyanNeural"))
+VOICE_HINT = os.environ.get("JARVIS_SAPI_VOICE", "david")  # preferred Windows voice fallback
+VOICE_RATE = os.environ.get("JARVIS_VOICE_RATE", _voice_config.get("rate", "+0%"))
+VOICE_PITCH = os.environ.get("JARVIS_VOICE_PITCH", _voice_config.get("pitch", "+0Hz"))
+VOICE_VOLUME = os.environ.get("JARVIS_VOICE_VOLUME", _voice_config.get("volume", "+0%"))
+VOICE_CACHE_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    _voice_config.get("cache_dir", os.path.join("data", "tts-cache")),
+)
 SPEECH_RATE = 175
 
 SAMPLE_RATE = 16000
@@ -408,7 +426,7 @@ def beep(freq: float = 880, dur: float = 0.08) -> None:
 
 # ------------------------------ TTS Worker ------------------------------
 class TTSWorker:
-    """Dedicated background thread for persistent, sub-millisecond Windows SAPI / fallback TTS."""
+    """Persistent TTS worker with optional neural Edge voice and offline fallback."""
 
     def __init__(self, voice_hint: str = VOICE_HINT, rate: int = 1) -> None:
         self.q: queue.Queue = queue.Queue()
@@ -440,6 +458,10 @@ class TTSWorker:
                 logger.warning(f"SAPI TTS initialization failed: {e}. Falling back to pyttsx3.")
                 voice = None
 
+        edge_enabled = VOICE_ENGINE in {"edge", "edge-tts", "neural"}
+        if edge_enabled:
+            logger.info("Neural TTS enabled: %s (%s, %s, %s)", VOICE_NAME, VOICE_RATE, VOICE_PITCH, VOICE_VOLUME)
+
         while True:
             item = self.q.get()
             if item is None:
@@ -463,7 +485,9 @@ class TTSWorker:
                 except Exception:
                     pass
 
-                if voice is not None:
+                if edge_enabled and self._speak_edge(clean_text):
+                    pass
+                elif voice is not None:
                     try:
                         voice.Speak(clean_text, 0)
                     except Exception as e:
@@ -484,6 +508,37 @@ class TTSWorker:
             self.q.task_done()
             if self.q.empty():
                 self._busy.clear()
+
+    @staticmethod
+    def _speak_edge(text: str) -> bool:
+        """Synthesize and play one sentence; return False so the caller can use SAPI."""
+        try:
+            import asyncio
+            from edge_tts import Communicate
+            from playsound3 import playsound
+
+            os.makedirs(VOICE_CACHE_DIR, exist_ok=True)
+            digest = hashlib.sha256(
+                f"{VOICE_NAME}|{VOICE_RATE}|{VOICE_PITCH}|{VOICE_VOLUME}|{text}".encode("utf-8")
+            ).hexdigest()
+            audio_path = os.path.join(VOICE_CACHE_DIR, f"{digest}.mp3")
+
+            async def synthesize() -> None:
+                await Communicate(
+                    text,
+                    VOICE_NAME,
+                    rate=VOICE_RATE,
+                    pitch=VOICE_PITCH,
+                    volume=VOICE_VOLUME,
+                ).save(audio_path)
+
+            if not os.path.exists(audio_path):
+                asyncio.run(synthesize())
+            playsound(audio_path, block=True)
+            return True
+        except Exception as exc:
+            logger.warning("Neural TTS failed; using local fallback: %s", exc)
+            return False
 
     def is_busy(self) -> bool:
         return self._busy.is_set()

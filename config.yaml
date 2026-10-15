@@ -1,6 +1,15 @@
 # JARVIS Configuration & Safety Policy
 version: "2.0"
 
+voice:
+  # Keep "sapi" for offline Windows speech. Set to "edge" after installing edge-tts.
+  engine: "sapi"
+  name: "en-GB-RyanNeural"
+  rate: "+0%"
+  pitch: "+0Hz"
+  volume: "+0%"
+  cache_dir: "data/tts-cache"
+
 safety:
   confirmation_timeout_seconds: 5.0
   action_log_path: "logs/actions.log"

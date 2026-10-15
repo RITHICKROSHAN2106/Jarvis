@@ -220,3 +220,28 @@ Checks the noise filter, wake-word confirmation, echo guard, click-vs-speech det
 1. Close every running copy first (Task Manager > `python.exe` / `pythonw.exe`), or the old one keeps talking.
 2. Copy these files over your project folder (your `venv`, `data` and `logs` are not touched).
 3. `python jarvis.py --wake-debug`, then run it normally.
+
+## Changeable neural voice
+
+JARVIS keeps Windows SAPI as the offline-safe default. To use the optional free
+Edge neural voice, install the requirements and change `voice.engine` in
+`config.yaml` from `sapi` to `edge`. The configured voice is `voice.name`; rate,
+pitch, volume, and the local short-phrase cache are configurable there as well.
+Neural synthesis requires internet access. If synthesis or playback fails,
+JARVIS logs the error and falls back to SAPI/pyttsx3 without changing the
+`TTSWorker` interface or echo guard.
+
+Useful voice settings:
+
+```yaml
+voice:
+  engine: "edge"
+  name: "en-GB-RyanNeural"
+  rate: "+0%"
+  pitch: "+0Hz"
+  volume: "+0%"
+```
+
+You can override these for one run with `JARVIS_VOICE_ENGINE`, `JARVIS_VOICE_NAME`,
+`JARVIS_VOICE_RATE`, `JARVIS_VOICE_PITCH`, and `JARVIS_VOICE_VOLUME`. Never put
+API keys in this file.
