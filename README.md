@@ -245,3 +245,12 @@ voice:
 You can override these for one run with `JARVIS_VOICE_ENGINE`, `JARVIS_VOICE_NAME`,
 `JARVIS_VOICE_RATE`, `JARVIS_VOICE_PITCH`, and `JARVIS_VOICE_VOLUME`. Never put
 API keys in this file.
+
+## Multilingual speech recognition
+
+Cloud Whisper now auto-detects the spoken language from `verbose_json`; the
+English `language` override is intentionally not sent. The local fallback uses
+the multilingual `small` model (override with `JARVIS_WHISPER_MODEL`) and also
+auto-detects language. The selected Groq model can be changed with
+`JARVIS_GROQ_STT_MODEL` for accuracy experiments, for example
+`whisper-large-v3`.
