@@ -246,14 +246,13 @@ You can override these for one run with `JARVIS_VOICE_ENGINE`, `JARVIS_VOICE_NAM
 `JARVIS_VOICE_RATE`, `JARVIS_VOICE_PITCH`, and `JARVIS_VOICE_VOLUME`. Never put
 API keys in this file.
 
-## Multilingual speech recognition
+## English-only communication
 
-Cloud Whisper now auto-detects the spoken language from `verbose_json`; the
-English `language` override is intentionally not sent. The local fallback uses
-the multilingual `small` model (override with `JARVIS_WHISPER_MODEL`) and also
-auto-detects language. The selected Groq model can be changed with
-`JARVIS_GROQ_STT_MODEL` for accuracy experiments, for example
-`whisper-large-v3`.
+JARVIS is configured for English speech recognition and English replies. Cloud
+and local Whisper both receive an explicit English language setting; the local
+fallback uses `small.en`. This keeps spoken interaction consistent and avoids
+switching languages unexpectedly. The selected Groq model can still be changed
+with `JARVIS_GROQ_STT_MODEL` for accuracy experiments.
 
 ## Controlled text-based system access
 

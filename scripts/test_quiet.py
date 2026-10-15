@@ -45,25 +45,7 @@ check("'yes' blocked normally", j.is_noise_transcript("Yes."))
 check("'yes' allowed when he asked a question", not j.is_noise_transcript("Yes.", allow_short_replies=True))
 check("dictation keeps 'okay'", not j.is_noise_transcript("Okay.", dictation=True))
 check("dictation blocks 'Bop.'", j.is_noise_transcript("Bop.", dictation=True))
-check("multilingual local model is selected", j.WHISPER_MODEL == "small")
-check("multilingual junk phrase is blocked", j.is_noise_transcript("நன்றி"))
-
-class FakeLocalSegment:
-    text = "வணக்கம் ஜார்விஸ்"
-    no_speech_prob = 0.02
-    avg_logprob = -0.2
-    compression_ratio = 1.1
-
-class FakeLocalSTT:
-    def transcribe(self, audio, **kwargs):
-        self.kwargs = kwargs
-        return iter([FakeLocalSegment()]), types.SimpleNamespace(language="ta")
-
-fake_stt = FakeLocalSTT()
-j.get_groq_stt_client = lambda: None
-local_text = j.transcribe(fake_stt, np.ones(1600, dtype=np.float32) * 0.1)
-check("local Whisper auto-detects language", local_text == "வணக்கம் ஜார்விஸ்" and fake_stt.kwargs["language"] is None)
-check("local detected language is retained", j.last_detected_language == "ta")
+check("English local model is selected", j.WHISPER_MODEL == "small.en")
 
 # ---------- 2. whisper confidence rules ----------
 check("seg: silent+unsure dropped", j.segment_is_junk(0.9, -1.5, 1.0))

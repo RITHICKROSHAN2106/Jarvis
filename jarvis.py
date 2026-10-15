@@ -157,7 +157,7 @@ PROVIDERS = {
     },
 }
 
-WHISPER_MODEL = os.environ.get("JARVIS_WHISPER_MODEL", "small")  # multilingual local fallback
+WHISPER_MODEL = os.environ.get("JARVIS_WHISPER_MODEL", "small.en")  # English local fallback
 GROQ_STT_MODEL = os.environ.get("JARVIS_GROQ_STT_MODEL", "whisper-large-v3-turbo")
 
 ENABLE_WAKE_WORD = True
@@ -216,8 +216,7 @@ pending_power_action: str | None = None
 
 SYSTEM_PROMPT = (
     f"You are {NAME}, a brilliant, witty, high-tech AI assistant modeled after Tony Stark's JARVIS. "
-    "Your replies are spoken aloud, so answer in one short sentence of plain spoken text: no markdown, no emojis, no code blocks, no JSON. "
-    "Reply in the user's detected language, including mixed-language speech, unless the user explicitly requests another language. "
+    "Your replies are spoken aloud, so answer in one short sentence of plain spoken English: no markdown, no emojis, no code blocks, no JSON. "
     "Do not repeat your previous reply. If the user's request is unclear, ask one brief clarifying question instead of guessing. "
     f"Address the user as '{USER_TITLE}'. "
     "All computer actions are executed by your system core. For actions not handled by a built-in command, emit one action tag using exactly one of: "
@@ -626,10 +625,6 @@ _NOISE_PHRASES = {
 }
 _SHORT_REPLIES = {"yes", "no", "yeah", "yep", "okay", "ok", "confirm", "cancel", "do it", "go ahead", "stop", "right"}
 _NOISE_REGEX = re.compile(r"(thanks? for watching|subtitles? by|amara\.org|like and subscribe|www\.|\.com\b|字幕|ご視聴)", re.I)
-_MULTILINGUAL_NOISE_PHRASES = {
-    "धन्यवाद", "धन्यवाद देखने के लिए", "வணக்கம்", "நன்றி", "பார்த்ததற்கு நன்றி",
-    "ధన్యవాదాలు", "നന്ദി", "ಧನ್ಯವಾದಗಳು",
-}
 
 
 def segment_is_junk(no_speech_prob, avg_logprob, compression_ratio) -> bool:
@@ -648,8 +643,6 @@ def is_noise_transcript(text: str, allow_short_replies: bool = False, dictation:
     t = re.sub(r"\s+", " ", t).strip()
     if not t:
         return True
-    if text.strip().lower() in {phrase.lower() for phrase in _MULTILINGUAL_NOISE_PHRASES}:
-        return True
     if len(re.sub(r"[\W\d_]", "", t)) < 2 or _NOISE_REGEX.search(text):
         return True
     words = t.split()
@@ -664,7 +657,6 @@ def is_noise_transcript(text: str, allow_short_replies: bool = False, dictation:
 
 
 _groq_stt_client = None
-last_detected_language = ""
 
 
 def get_groq_stt_client():
@@ -678,8 +670,7 @@ def get_groq_stt_client():
 
 
 def transcribe(stt, audio: np.ndarray) -> str:
-    """Hybrid multilingual STT with cloud language detection and local fallback."""
-    global last_detected_language
+    """Hybrid English STT with Groq cloud and local faster-whisper fallback."""
     prompt = ", ".join(STT_VOCAB)  # vocabulary only: instruction-style prompts make Whisper invent words from noise
 
     if float(np.sqrt(np.mean(np.square(audio)))) < 0.006:
@@ -705,11 +696,11 @@ def transcribe(stt, audio: np.ndarray) -> str:
                 model=GROQ_STT_MODEL,
                 file=buf,
                 prompt=prompt,
+                language="en",
                 temperature=0.0,
                 response_format="verbose_json",
             )
             lat = (time.perf_counter() - t0) * 1000
-            last_detected_language = str(getattr(resp, "language", "") or "").strip().lower()
             text = (getattr(resp, "text", "") or "").strip()
             segments = getattr(resp, "segments", None) or []
             if segments:  # drop segments Whisper itself is unsure about (the usual source of invented words)
@@ -721,9 +712,7 @@ def transcribe(stt, audio: np.ndarray) -> str:
                         continue
                     kept.append((get("text") or "").strip())
                 text = " ".join(k for k in kept if k).strip()
-            logger.info(
-                f"Groq Cloud STT ({lat:.0f}ms, language={last_detected_language or 'unknown'}): '{text}'"
-            )
+            logger.info(f"Groq Cloud STT ({lat:.0f}ms, language=en): '{text}'")
             return text
         except Exception as e:
             logger.warning(f"Groq STT failed ({e}), falling back to local Whisper...")
@@ -732,7 +721,7 @@ def transcribe(stt, audio: np.ndarray) -> str:
     t0 = time.perf_counter()
     segments, info = stt.transcribe(
         audio,
-        language=None,
+        language="en",
         beam_size=4,
         initial_prompt=prompt,
         vad_filter=True,
@@ -746,9 +735,7 @@ def transcribe(stt, audio: np.ndarray) -> str:
         for seg in segments
         if not segment_is_junk(seg.no_speech_prob, seg.avg_logprob, seg.compression_ratio)
     ).strip()
-    detected = getattr(info, "language", "") or "auto"
-    last_detected_language = str(detected).lower()
-    logger.info(f"Local Whisper STT ({lat:.0f}ms, language={last_detected_language}): '{text}'")
+    logger.info(f"Local Whisper STT ({lat:.0f}ms, language=en): '{text}'")
     return text
 
 
@@ -2076,18 +2063,13 @@ def session(q: queue.Queue, stt, brain: Brain) -> None:
                     hud.set_transcript(jarvis=sentence)
                     speak(sentence, block=False)
 
-                prompt = (
-                    f"The detected user language is {last_detected_language or 'unknown'}. "
-                    "Reply in that language unless the user asks otherwise. "
-                    f"User request: {text}"
-                )
+                prompt = f"Reply in English. User request: {text}"
                 if needs_live_context(text):
                     live_context = fetch_live_context(text)
                     if live_context:
                         prompt = (
                             f"Answer the user's time-sensitive question using these fresh web search snippets. "
                             f"Clearly distinguish confirmed facts from uncertain or incomplete information. "
-                            f"Detected language: {last_detected_language or 'unknown'}\n"
                             f"Question: {text}\nFresh snippets:\n{live_context}"
                         )
                 spoken = brain.ask_stream(prompt, on_sentence=_stream_speaker)
