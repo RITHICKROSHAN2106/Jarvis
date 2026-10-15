@@ -1,0 +1,60 @@
+# JARVIS Configuration & Safety Policy
+version: "2.0"
+
+safety:
+  confirmation_timeout_seconds: 5.0
+  action_log_path: "logs/actions.log"
+  sandbox_dir: "data/sandbox"
+
+  # Tier 1: Safe actions - executed immediately without prompt
+  tier1_safe:
+    - open_app
+    - open_url
+    - search_google
+    - search_youtube
+    - type_notepad
+    - type_calc
+    - control_window
+    - control_volume
+    - read_file
+    - list_dir
+    - get_system_stats
+
+  # Tier 2: System-altering / destructive actions - confirmation required or 5s voice cancel window
+  tier2_confirm:
+    - delete_file          # ALWAYS uses send2trash (Recycle Bin)
+    - close_app
+    - kill_process
+    - shutdown
+    - restart
+    - sleep
+    - lock
+    - write_file
+    - run_powershell
+
+  # Tier 3: Blocked actions - strictly prohibited under all circumstances
+  tier3_blocked:
+    - format_drive
+    - delete_system_dir
+    - mass_delete
+    - wipe_disk
+    - edit_registry_system
+    - clear_event_logs
+
+blocked_paths:
+  - "C:\\Windows"
+  - "C:\\Program Files"
+  - "C:\\Program Files (x86)"
+  - "C:\\Users\\Default"
+  - "C:\\Recovery"
+  - "C:\\Boot"
+
+blocked_command_patterns:
+  - "(?i)rmdir\\s+/[sS]"
+  - "(?i)del\\s+/[fF]"
+  - "(?i)format\\s+[a-zA-Z]:"
+  - "(?i)diskpart"
+  - "(?i)vssadmin\\s+delete"
+  - "(?i)bcdedit"
+  - "(?i)reg\\s+delete"
+  - "(?i)wevtutil\\s+cl"

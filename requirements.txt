@@ -1,0 +1,13 @@
+numpy
+sounddevice
+openwakeword
+onnxruntime
+faster-whisper
+pyttsx3
+openai
+pyautogui
+rapidfuzz
+send2trash
+pyyaml
+pyperclip
+# anthropic   # only needed if you set LLM_PROVIDER = "anthropic" (paid)
