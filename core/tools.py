@@ -166,6 +166,116 @@ class SafetyManager:
             self.log_action("list_dir", 1, {"path": abs_path}, "FAILED", str(e))
             return f"Error listing directory: {e}"
 
+    def create_folder(self, folder_path: str) -> str:
+        abs_path = os.path.abspath(folder_path)
+        if self.is_path_blocked(abs_path):
+            self.log_action("create_folder", 3, {"path": abs_path}, "BLOCKED", "Protected system path")
+            return "Action blocked, boss. Cannot create folders in protected system paths."
+        try:
+            os.makedirs(abs_path, exist_ok=True)
+            self.log_action("create_folder", 1, {"path": abs_path}, "EXECUTED")
+            return f"Folder ready: {abs_path}"
+        except OSError as exc:
+            self.log_action("create_folder", 1, {"path": abs_path}, "FAILED", str(exc))
+            return f"Failed to create folder: {exc}"
+
+    def find_files(self, root: str = ".", name: str = "", content: str = "", limit: int = 50) -> str:
+        """Find files by name and optional text, bounded to avoid scanning the whole disk."""
+        base = os.path.abspath(root)
+        if self.is_path_blocked(base):
+            self.log_action("find_files", 3, {"root": base}, "BLOCKED", "Protected system path")
+            return "Action blocked, boss. That search root is protected."
+        if not os.path.isdir(base):
+            return f"Directory does not exist: {root}"
+        needle = name.casefold()
+        text_needle = content.casefold()
+        found: list[str] = []
+        try:
+            for current, dirs, files in os.walk(base):
+                dirs[:] = [d for d in dirs if not self.is_path_blocked(os.path.join(current, d))]
+                for filename in files:
+                    if needle and needle not in filename.casefold():
+                        continue
+                    path = os.path.join(current, filename)
+                    if text_needle:
+                        try:
+                            with open(path, "r", encoding="utf-8", errors="ignore") as handle:
+                                if text_needle not in handle.read(1_000_000).casefold():
+                                    continue
+                        except (OSError, UnicodeError):
+                            continue
+                    found.append(path)
+                    if len(found) >= max(1, min(int(limit), 100)):
+                        break
+                if len(found) >= max(1, min(int(limit), 100)):
+                    break
+            self.log_action("find_files", 1, {"root": base, "name": name, "content": bool(content)}, "EXECUTED")
+            return "\n".join(found) if found else "No matching files found."
+        except OSError as exc:
+            self.log_action("find_files", 1, {"root": base}, "FAILED", str(exc))
+            return f"File search failed: {exc}"
+
+    def list_running(self) -> str:
+        try:
+            result = subprocess.run(
+                ["tasklist", "/FO", "CSV", "/NH"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10, check=False,
+            )
+            lines = [line for line in result.stdout.splitlines() if line.strip()]
+            self.log_action("list_running", 1, {}, "EXECUTED", f"count={len(lines)}")
+            return "\n".join(lines[:50]) if lines else "No running processes reported."
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            self.log_action("list_running", 1, {}, "FAILED", str(exc))
+            return f"Could not list running processes: {exc}"
+
+    def open_path(self, path: str) -> str:
+        abs_path = os.path.abspath(os.path.expandvars(os.path.expanduser(path)))
+        if not os.path.exists(abs_path):
+            return f"Path does not exist: {path}"
+        try:
+            os.startfile(abs_path)
+            self.log_action("open_path", 1, {"path": abs_path}, "EXECUTED")
+            return f"Opened {abs_path}, boss."
+        except (AttributeError, OSError) as exc:
+            self.log_action("open_path", 1, {"path": abs_path}, "FAILED", str(exc))
+            return f"Could not open path: {exc}"
+
+    def copy_file(self, source: str, destination: str) -> str:
+        src = os.path.abspath(source)
+        dst = os.path.abspath(destination)
+        if self.is_path_blocked(src) or self.is_path_blocked(dst):
+            self.log_action("copy_file", 3, {"source": src, "destination": dst}, "BLOCKED", "Protected system path")
+            return "Action blocked, boss. Protected system paths cannot be copied to or from."
+        try:
+            if os.path.exists(dst):
+                return "Copy cancelled: destination already exists."
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copy2(src, dst)
+            self.undo_stack.append({"action": "copy_file", "source": src, "destination": dst, "timestamp": dt.datetime.now().isoformat()})
+            self.log_action("copy_file", 2, {"source": src, "destination": dst}, "EXECUTED")
+            return f"Copied {os.path.basename(src)} to {dst}, boss."
+        except OSError as exc:
+            self.log_action("copy_file", 2, {"source": src, "destination": dst}, "FAILED", str(exc))
+            return f"Copy failed: {exc}"
+
+    def move_file(self, source: str, destination: str) -> str:
+        src = os.path.abspath(source)
+        dst = os.path.abspath(destination)
+        if self.is_path_blocked(src) or self.is_path_blocked(dst):
+            self.log_action("move_file", 3, {"source": src, "destination": dst}, "BLOCKED", "Protected system path")
+            return "Action blocked, boss. Protected system paths cannot be moved."
+        try:
+            if os.path.exists(dst):
+                return "Move cancelled: destination already exists."
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.move(src, dst)
+            self.undo_stack.append({"action": "move_file", "source": src, "destination": dst, "timestamp": dt.datetime.now().isoformat()})
+            self.log_action("move_file", 2, {"source": src, "destination": dst}, "EXECUTED")
+            return f"Moved {os.path.basename(src)} to {dst}, boss."
+        except OSError as exc:
+            self.log_action("move_file", 2, {"source": src, "destination": dst}, "FAILED", str(exc))
+            return f"Move failed: {exc}"
+
     def get_system_stats(self) -> str:
         """Return basic CPU, memory, and disk health (Tier 1)."""
         try:
@@ -253,6 +363,18 @@ class SafetyManager:
             return self.list_dir(args.get("path", "."))
         elif action == "get_system_stats":
             return self.get_system_stats()
+        elif action == "create_folder":
+            return self.create_folder(args.get("path", ""))
+        elif action == "find_files":
+            return self.find_files(args.get("root", "."), args.get("name", ""), args.get("content", ""), args.get("limit", 50))
+        elif action == "list_running":
+            return self.list_running()
+        elif action == "open_path":
+            return self.open_path(args.get("path", ""))
+        elif action == "copy_file":
+            return self.copy_file(args.get("source", ""), args.get("destination", ""))
+        elif action == "move_file":
+            return self.move_file(args.get("source", ""), args.get("destination", ""))
         elif action == "run_powershell":
             return self.run_powershell(args.get("command", ""), args.get("timeout_seconds", 30))
 

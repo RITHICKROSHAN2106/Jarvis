@@ -27,6 +27,10 @@ safety:
     - control_volume
     - read_file
     - list_dir
+    - find_files
+    - create_folder
+    - list_running
+    - open_path
     - get_system_stats
 
   # Tier 2: System-altering / destructive actions - confirmation required or 5s voice cancel window
@@ -39,6 +43,8 @@ safety:
     - sleep
     - lock
     - write_file
+    - copy_file
+    - move_file
     - run_powershell
 
   # Tier 3: Blocked actions - strictly prohibited under all circumstances

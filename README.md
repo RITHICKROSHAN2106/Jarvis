@@ -270,3 +270,8 @@ path remains possible. It will not delete Windows, Program Files, Recovery,
 Boot, or other protected system paths. Opening a normal `cmd.exe` window is
 supported through the existing app launcher, but JARVIS does not grant that
 window administrator rights.
+
+The structured file/process registry also supports bounded `find_files`,
+`create_folder`, `copy_file`, `move_file`, `list_running`, and `open_path`
+operations. Copy and move require confirmation and refuse to overwrite an
+existing destination; searches are capped at 100 results.
