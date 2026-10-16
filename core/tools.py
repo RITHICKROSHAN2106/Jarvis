@@ -13,6 +13,7 @@ import re
 import shutil
 import subprocess
 import sys
+import zipfile
 from logging.handlers import RotatingFileHandler
 from typing import Any, Callable
 
@@ -86,6 +87,9 @@ class SafetyManager:
             {"name": "move_file", "tier": self.get_tier("move_file"), "parameters": {"source": "string", "destination": "string"}},
             {"name": "rename_file", "tier": self.get_tier("rename_file"), "parameters": {"path": "string", "new_name": "string"}},
             {"name": "append_file", "tier": self.get_tier("append_file"), "parameters": {"path": "string", "content": "string"}},
+            {"name": "zip_files", "tier": self.get_tier("zip_files"), "parameters": {"source": "string", "archive": "string"}},
+            {"name": "unzip_file", "tier": self.get_tier("unzip_file"), "parameters": {"archive": "string", "destination": "string"}},
+            {"name": "kill_process", "tier": self.get_tier("kill_process"), "parameters": {"pid": "integer"}},
             {"name": "delete_file", "tier": self.get_tier("delete_file"), "parameters": {"path": "string"}},
             {"name": "run_powershell", "tier": self.get_tier("run_powershell"), "parameters": {"command": "string", "timeout_seconds": "integer"}},
         ]
@@ -331,6 +335,82 @@ class SafetyManager:
             self.log_action("undo", 2, action, "FAILED", str(exc))
             return f"Undo failed safely: {exc}"
 
+    def zip_files(self, source: str, archive: str) -> str:
+        src = os.path.abspath(source)
+        dst = os.path.abspath(archive)
+        if self.is_path_blocked(src) or self.is_path_blocked(dst):
+            self.log_action("zip_files", 3, {"source": src, "archive": dst}, "BLOCKED", "Protected system path")
+            return "Action blocked, boss. Protected system paths cannot be archived."
+        if not os.path.exists(src):
+            return f"Archive source does not exist: {source}"
+        if os.path.isdir(dst):
+            return "Archive cancelled: destination is a directory."
+        if os.path.exists(dst):
+            return "Archive cancelled: destination already exists."
+        try:
+            base = os.path.dirname(src) if os.path.isfile(src) else src
+            with zipfile.ZipFile(dst, "x", zipfile.ZIP_DEFLATED) as archive_file:
+                if os.path.isfile(src):
+                    archive_file.write(src, os.path.basename(src))
+                else:
+                    for current, dirs, files in os.walk(src):
+                        dirs[:] = [d for d in dirs if not self.is_path_blocked(os.path.join(current, d))]
+                        for filename in files:
+                            path = os.path.join(current, filename)
+                            archive_file.write(path, os.path.relpath(path, base))
+            self.log_action("zip_files", 1, {"source": src, "archive": dst}, "EXECUTED")
+            return f"Created archive {dst}, boss."
+        except (OSError, zipfile.BadZipFile) as exc:
+            self.log_action("zip_files", 1, {"source": src, "archive": dst}, "FAILED", str(exc))
+            return f"Archive failed: {exc}"
+
+    def unzip_file(self, archive: str, destination: str) -> str:
+        src = os.path.abspath(archive)
+        dst = os.path.abspath(destination)
+        if self.is_path_blocked(src) or self.is_path_blocked(dst):
+            self.log_action("unzip_file", 3, {"archive": src, "destination": dst}, "BLOCKED", "Protected system path")
+            return "Action blocked, boss. Protected system paths cannot be extracted there."
+        try:
+            os.makedirs(dst, exist_ok=True)
+            with zipfile.ZipFile(src) as archive_file:
+                root = os.path.realpath(dst)
+                for member in archive_file.infolist():
+                    target = os.path.realpath(os.path.join(dst, member.filename))
+                    if target != root and not target.startswith(root + os.sep):
+                        return "Extraction blocked: archive contains an unsafe path."
+                    if os.path.exists(target):
+                        return f"Extraction cancelled: destination already contains {member.filename}."
+                archive_file.extractall(dst)
+            self.log_action("unzip_file", 1, {"archive": src, "destination": dst}, "EXECUTED")
+            return f"Extracted archive to {dst}, boss."
+        except (OSError, zipfile.BadZipFile) as exc:
+            self.log_action("unzip_file", 1, {"archive": src, "destination": dst}, "FAILED", str(exc))
+            return f"Extraction failed: {exc}"
+
+    def kill_process(self, pid: int) -> str:
+        try:
+            process_id = int(pid)
+            if process_id <= 0 or process_id == os.getpid():
+                return "I will not terminate this safety process, boss."
+            details = subprocess.run(
+                ["tasklist", "/FI", f"PID eq {process_id}", "/FO", "CSV", "/NH"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10, check=False,
+            ).stdout.strip()
+            if not details or details.upper().startswith("INFO:"):
+                return f"No running process found for PID {process_id}."
+            process_name = details.split(",", 1)[0].strip('"').casefold()
+            protected_names = {"system", "registry", "smss.exe", "csrss.exe", "wininit.exe", "services.exe", "lsass.exe", "winlogon.exe"}
+            if process_name in protected_names or process_name in {"python.exe", "pythonw.exe"} and process_id == os.getppid():
+                self.log_action("kill_process", 2, {"pid": process_id, "name": process_name}, "BLOCKED", "Protected process")
+                return f"I will not terminate protected process {process_name}, boss."
+            result = subprocess.run(["taskkill", "/PID", str(process_id), "/T", "/F"], capture_output=True, text=True, timeout=10, check=False)
+            status = "EXECUTED" if result.returncode == 0 else "FAILED"
+            self.log_action("kill_process", 2, {"pid": process_id, "name": process_name}, status, f"exit_code={result.returncode}")
+            return (result.stdout or result.stderr or f"Process operation exit code {result.returncode}").strip()
+        except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
+            self.log_action("kill_process", 2, {"pid": pid}, "FAILED", str(exc))
+            return f"Could not terminate process: {exc}"
+
     def copy_file(self, source: str, destination: str) -> str:
         src = os.path.abspath(source)
         dst = os.path.abspath(destination)
@@ -472,6 +552,12 @@ class SafetyManager:
             return self.rename_file(args.get("path", ""), args.get("new_name", ""))
         elif action == "append_file":
             return self.append_file(args.get("path", ""), args.get("content", ""))
+        elif action == "zip_files":
+            return self.zip_files(args.get("source", ""), args.get("archive", ""))
+        elif action == "unzip_file":
+            return self.unzip_file(args.get("archive", ""), args.get("destination", ""))
+        elif action == "kill_process":
+            return self.kill_process(args.get("pid", 0))
         elif action == "run_powershell":
             return self.run_powershell(args.get("command", ""), args.get("timeout_seconds", 30))
 

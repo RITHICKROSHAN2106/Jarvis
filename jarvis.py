@@ -1372,6 +1372,14 @@ def execute_action(action_str: str) -> str | None:
     if verb == "rename_file":
         path, _, new_name = arg.partition(" ")
         return tools.execute_tool("rename_file", {"path": path, "new_name": new_name})
+    if verb == "zip_files":
+        source, _, archive = arg.partition(" ")
+        return tools.execute_tool("zip_files", {"source": source, "archive": archive})
+    if verb == "unzip_file":
+        archive, _, destination = arg.partition(" ")
+        return tools.execute_tool("unzip_file", {"archive": archive, "destination": destination})
+    if verb == "kill_process":
+        return tools.execute_tool("kill_process", {"pid": arg})
     if verb == "search_google":
         open_url("https://www.google.com/search?q=" + urllib.parse.quote_plus(arg))
         return f"Searching Google for {arg}, {USER_TITLE}."
@@ -1475,6 +1483,9 @@ def action_is_requested(user_text: str, action_str: str) -> bool:
         "file_info": ("info", "inspect", "show"),
         "append_file": ("append", "add"),
         "rename_file": ("rename",),
+        "zip_files": ("zip", "archive"),
+        "unzip_file": ("unzip", "extract"),
+        "kill_process": ("kill process", "terminate process"),
     }
     required_phrases = requirements.get(verb)
     return bool(required_phrases and any(phrase in user for phrase in required_phrases))
@@ -1537,6 +1548,17 @@ def run_builtin(text: str) -> str | None:
         if t.startswith(prefix):
             path, _, new_name = text[len(prefix):].partition(" to ")
             return tools.execute_tool("rename_file", {"path": path.strip(), "new_name": new_name.strip()})
+    for prefix in ("zip ", "archive "):
+        if t.startswith(prefix):
+            source, _, archive = text[len(prefix):].partition(" to ")
+            return tools.execute_tool("zip_files", {"source": source.strip(), "archive": archive.strip()})
+    for prefix in ("unzip ", "extract "):
+        if t.startswith(prefix):
+            archive, _, destination = text[len(prefix):].partition(" to ")
+            return tools.execute_tool("unzip_file", {"archive": archive.strip(), "destination": destination.strip()})
+    for prefix in ("kill process ", "terminate process "):
+        if t.startswith(prefix):
+            return tools.execute_tool("kill_process", {"pid": text[len(prefix):].strip()})
 
     # HUD Controls
     if any(p in t for p in ("show hud", "open hud", "display hud", "bring up hud")):

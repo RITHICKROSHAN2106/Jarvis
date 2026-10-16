@@ -38,7 +38,6 @@ safety:
   tier2_confirm:
     - delete_file          # ALWAYS uses send2trash (Recycle Bin)
     - close_app
-    - kill_process
     - shutdown
     - restart
     - sleep
@@ -48,6 +47,9 @@ safety:
     - move_file
     - rename_file
     - append_file
+    - kill_process
+    - zip_files
+    - unzip_file
     - run_powershell
 
   # Tier 3: Blocked actions - strictly prohibited under all circumstances

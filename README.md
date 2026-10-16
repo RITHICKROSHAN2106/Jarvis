@@ -281,5 +281,11 @@ when the original state is still safe to restore. Recycle Bin deletion remains
 recoverable through Windows Explorer rather than pretending it can be restored
 silently.
 
+Archive operations are available as Tier 2 actions: say “zip [source] to
+[archive]” or “unzip [archive] to [destination]”. Existing destinations and
+unsafe archive paths are refused. Process termination is also Tier 2: “kill
+process [PID]” requires confirmation, refuses JARVIS and protected Windows
+processes, and records the result in the audit log.
+
 Use `python jarvis.py --tools` to inspect the machine-readable safety-tiered
 tool catalog exposed to integrations and future tool-calling models.
