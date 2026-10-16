@@ -226,6 +226,8 @@ SYSTEM_PROMPT = (
     "[ACTION: close_app APP], [ACTION: shutdown], [ACTION: restart], [ACTION: lock], or [ACTION: sleep]. "
     "Never invent coordinates. Current-information questions may include fresh web snippets; treat them as potentially incomplete and say when verification is needed. "
     "Only say an action is done if you emitted an action tag for it. "
+    "Available safe system action tags include [ACTION: read_file PATH], [ACTION: list_dir PATH], "
+    "[ACTION: find_files ROOT], [ACTION: create_folder PATH], [ACTION: open_path PATH], and [ACTION: list_running]. "
     "Never add filler such as 'Got it' or 'All systems nominal'. "
     "If the user's words are noise, a stray fragment, or clearly not addressed to you, reply with exactly [IGNORE] and nothing else."
 )
@@ -1350,6 +1352,18 @@ def execute_action(action_str: str) -> str | None:
     if verb == "open_url":
         open_url(arg)
         return f"Opening {arg}, {USER_TITLE}."
+    if verb == "read_file":
+        return tools.execute_tool("read_file", {"path": arg})
+    if verb == "list_dir":
+        return tools.execute_tool("list_dir", {"path": arg or "."})
+    if verb == "find_files":
+        return tools.execute_tool("find_files", {"root": arg or "."})
+    if verb == "create_folder":
+        return tools.execute_tool("create_folder", {"path": arg})
+    if verb == "open_path":
+        return tools.execute_tool("open_path", {"path": arg})
+    if verb == "list_running":
+        return tools.execute_tool("list_running", {})
     if verb == "search_google":
         open_url("https://www.google.com/search?q=" + urllib.parse.quote_plus(arg))
         return f"Searching Google for {arg}, {USER_TITLE}."
@@ -1444,6 +1458,12 @@ def action_is_requested(user_text: str, action_str: str) -> bool:
         "restart": ("restart", "reboot"),
         "lock": ("lock",),
         "sleep": ("sleep",),
+        "read_file": ("read", "show", "view"),
+        "list_dir": ("list", "show", "contents"),
+        "find_files": ("find", "search", "locate"),
+        "create_folder": ("create", "make"),
+        "open_path": ("open", "launch"),
+        "list_running": ("list", "show"),
     }
     required_phrases = requirements.get(verb)
     return bool(required_phrases and any(phrase in user for phrase in required_phrases))
@@ -1473,6 +1493,18 @@ def run_builtin(text: str) -> str | None:
         if t.startswith(prefix):
             target_path = text[len(prefix):].strip()
             return tools.read_file(target_path)
+
+    if t in ("list running", "list running processes", "show running processes", "what is running"):
+        return tools.execute_tool("list_running", {})
+    for prefix in ("create folder ", "make folder ", "create directory ", "make directory "):
+        if t.startswith(prefix):
+            return tools.execute_tool("create_folder", {"path": text[len(prefix):].strip()})
+    for prefix in ("find files ", "search files ", "locate files "):
+        if t.startswith(prefix):
+            return tools.execute_tool("find_files", {"root": text[len(prefix):].strip() or "."})
+    for prefix in ("open path ", "open folder ", "open file "):
+        if t.startswith(prefix):
+            return tools.execute_tool("open_path", {"path": text[len(prefix):].strip()})
 
     # Safe delete (Recycle Bin via send2trash)
     for prefix in ("trash file ", "delete file ", "remove file ", "send to trash "):
@@ -2142,6 +2174,13 @@ def list_models() -> None:
         print(f"Could not list models: {e}")
 
 
+def list_tools() -> None:
+    """Print the safety-tiered tool catalog for inspection and integrations."""
+    import json
+
+    print(json.dumps(tools.tool_catalog(), indent=2))
+
+
 def run_selftest() -> None:
     """Phase 4 Automated Tool and Safety Layer Verification Suite."""
     print("=== JARVIS AUTOMATED SELF-TEST (PHASE 4 SAFETY LAYER) ===")
@@ -2222,6 +2261,7 @@ def main() -> None:
     ap.add_argument("--levels", action="store_true", help="show live mic levels to tune the clap threshold")
     ap.add_argument("--test-llm", action="store_true", help="send one test question to the configured brain")
     ap.add_argument("--models", action="store_true", help="list the model names your API key can use")
+    ap.add_argument("--tools", action="store_true", help="list the safety-tiered system tool catalog")
     ap.add_argument("--wake-debug", action="store_true", help="live wake-word score meter for tuning the threshold")
     ap.add_argument("--selftest", action="store_true", help="run automated safety and tool suite")
     ap.add_argument("--no-hud", action="store_true", help="run headless without desktop GUI HUD")
@@ -2232,6 +2272,8 @@ def main() -> None:
         return test_llm()
     if args.models:
         return list_models()
+    if args.tools:
+        return list_tools()
     if args.wake_debug:
         return wake_debug()
     if args.selftest:

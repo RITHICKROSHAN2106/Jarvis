@@ -72,6 +72,21 @@ class SafetyManager:
             return 2
         return 1
 
+    def tool_catalog(self) -> list[dict[str, Any]]:
+        """Return stable JSON-compatible schemas for the tools exposed to the brain."""
+        return [
+            {"name": "read_file", "tier": self.get_tier("read_file"), "parameters": {"path": "string"}},
+            {"name": "list_dir", "tier": self.get_tier("list_dir"), "parameters": {"path": "string"}},
+            {"name": "find_files", "tier": self.get_tier("find_files"), "parameters": {"root": "string", "name": "string", "content": "string", "limit": "integer"}},
+            {"name": "create_folder", "tier": self.get_tier("create_folder"), "parameters": {"path": "string"}},
+            {"name": "open_path", "tier": self.get_tier("open_path"), "parameters": {"path": "string"}},
+            {"name": "list_running", "tier": self.get_tier("list_running"), "parameters": {}},
+            {"name": "copy_file", "tier": self.get_tier("copy_file"), "parameters": {"source": "string", "destination": "string"}},
+            {"name": "move_file", "tier": self.get_tier("move_file"), "parameters": {"source": "string", "destination": "string"}},
+            {"name": "delete_file", "tier": self.get_tier("delete_file"), "parameters": {"path": "string"}},
+            {"name": "run_powershell", "tier": self.get_tier("run_powershell"), "parameters": {"command": "string", "timeout_seconds": "integer"}},
+        ]
+
     def is_path_blocked(self, target_path: str) -> bool:
         norm = os.path.normcase(os.path.abspath(target_path))
         for b in self.config.get("blocked_paths", []):

@@ -274,3 +274,6 @@ The structured file/process registry also supports bounded `find_files`,
 `create_folder`, `copy_file`, `move_file`, `list_running`, and `open_path`
 operations. Copy and move require confirmation and refuse to overwrite an
 existing destination; searches are capped at 100 results.
+
+Use `python jarvis.py --tools` to inspect the machine-readable safety-tiered
+tool catalog exposed to integrations and future tool-calling models.
