@@ -35,6 +35,7 @@ import argparse
 import datetime as dt
 import faulthandler
 import html
+import json
 import logging
 from logging.handlers import RotatingFileHandler
 import os
@@ -1885,13 +1886,95 @@ class Brain:
         )
         return resp.choices[0].message.content or ""
 
+    def _native_tool_definitions(self) -> list[dict]:
+        """Convert the local catalog into OpenAI-compatible function schemas."""
+        definitions = []
+        for tool in tools.tool_catalog():
+            properties = {}
+            required = []
+            for name, kind in tool["parameters"].items():
+                properties[name] = {"type": kind}
+                required.append(name)
+            definitions.append({
+                "type": "function",
+                "function": {
+                    "name": tool["name"],
+                    "description": f"JARVIS tool '{tool['name']}' (safety tier {tool['tier']}).",
+                    "parameters": {
+                        "type": "object",
+                        "properties": properties,
+                        "required": required,
+                        "additionalProperties": False,
+                    },
+                },
+            })
+        return definitions
+
+    def _complete_with_native_tools(self) -> str:
+        """Run a bounded OpenAI-style tool loop for OpenAI-compatible providers."""
+        if self.provider == "anthropic":
+            raise RuntimeError("native tools are not enabled for the Anthropic adapter")
+        messages = [{"role": "system", "content": memory.inject_system_prompt(SYSTEM_PROMPT)}] + list(self.history)
+        tool_names = {item["name"] for item in tools.tool_catalog()}
+        for _ in range(8):
+            response = self.client.chat.completions.create(
+                model=self.model,
+                max_tokens=220,
+                temperature=0.2,
+                messages=messages,
+                tools=self._native_tool_definitions(),
+                tool_choice="auto",
+            )
+            message = response.choices[0].message
+            tool_calls = getattr(message, "tool_calls", None) or []
+            if not tool_calls:
+                return (message.content or "").strip()
+            assistant_message = {
+                "role": "assistant",
+                "content": message.content or "",
+                "tool_calls": [
+                    {
+                        "id": call.id,
+                        "type": "function",
+                        "function": {"name": call.function.name, "arguments": call.function.arguments},
+                    }
+                    for call in tool_calls
+                ],
+            }
+            messages.append(assistant_message)
+            for call in tool_calls:
+                name = call.function.name
+                if name not in tool_names:
+                    result = f"Unknown tool '{name}'."
+                else:
+                    try:
+                        args = json.loads(call.function.arguments or "{}")
+                    except (TypeError, json.JSONDecodeError):
+                        result = "Tool call rejected: arguments were not valid JSON."
+                    else:
+                        tier = tools.get_tier(name)
+                        if tier == 2:
+                            result = f"Confirmation required before '{name}'. Ask the user to confirm, boss."
+                            tools.log_action(name, tier, args, "PENDING", "Native tool call requires voice confirmation")
+                        else:
+                            result = tools.execute_tool(name, args, confirm_callback=lambda _prompt: False)
+                messages.append({"role": "tool", "tool_call_id": call.id, "content": result[:4000]})
+        return "I stopped the tool plan after eight steps, boss. Ask me to continue if needed."
+
     def ask(self, text: str) -> str:
         if not self.client:
             return f"My language core is offline, {USER_TITLE}. Please set your API key."
         self.history.append({"role": "user", "content": text})
         memory.add_turn("user", text)
         try:
-            raw_reply = self._complete().strip() or "Understood."
+            if self.provider != "anthropic" and os.environ.get("JARVIS_NATIVE_TOOLS", "1") != "0":
+                try:
+                    raw_reply = self._complete_with_native_tools() or "Understood."
+                except Exception as native_error:
+                    logger.warning(f"[native tools unavailable, using legacy completion] {native_error}")
+                    raw_reply = self._complete().strip() or "Understood."
+            else:
+                raw_reply = self._complete().strip() or "Understood."
         except Exception as e:
             self.history.pop()
             msg = str(e).lower()

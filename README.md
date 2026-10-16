@@ -289,3 +289,11 @@ processes, and records the result in the audit log.
 
 Use `python jarvis.py --tools` to inspect the machine-readable safety-tiered
 tool catalog exposed to integrations and future tool-calling models.
+
+## Native tool-calling
+
+OpenAI-compatible providers use the catalog for a bounded native function-call
+loop of at most eight steps. Set `JARVIS_NATIVE_TOOLS=0` to disable it and use
+the legacy action-tag path. Tier 1 tools can run in the loop; Tier 2 calls are
+logged as pending and require an explicit confirmation path rather than being
+silently executed; Tier 3 calls remain blocked.
