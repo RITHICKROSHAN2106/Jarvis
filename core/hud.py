@@ -1,41 +1,32 @@
-"""
-JARVIS Futuristic Desktop HUD (Phase 6)
-Lightweight Tkinter floating desktop HUD modeled after Tony Stark's Iron Man Mark 85 Arc Reactor.
-Features:
-  - Frameless, semi-transparent, draggable cyber-widget
-  - Animated pulsing Arc Reactor core with state transitions:
-      STANDBY  (subtle idle cyan glow)
-      LISTENING (pulsing active listening core)
-      THINKING  (spinning reactor rings)
-      SPEAKING  (undulating energy waveforms)
-  - Live transcript pane for speech and responses
-  - Thread-safe queue messaging to GUI thread
-  - Mute toggle and collapse-to-orb controls
+"""Fullscreen cinematic JARVIS command-bridge HUD.
+
+The public queue/state API is intentionally small so the audio loop can update
+the UI without touching Tkinter from a worker thread.
 """
 from __future__ import annotations
 
 import math
-import os
 import queue
-import sys
+import random
 import threading
 import time
-from typing import Any
 
-BG_COLOR = "#070A10"
-BORDER_COLOR = "#00D2FF"
-TEXT_COLOR = "#E0F2FE"
-ACCENT_CYAN = "#00F2FE"
-ACCENT_GOLD = "#FFD166"
-ACCENT_GREEN = "#06D6A0"
-ACCENT_RED = "#EF476F"
-ACCENT_PURPLE = "#A855F7"
+BG = "#030711"
+PANEL = "#071321"
+CYAN = "#37e6ff"
+CYAN_DIM = "#0b7897"
+GOLD = "#ffc857"
+PURPLE = "#a78bfa"
+GREEN = "#36e0a0"
+RED = "#ff5f76"
+TEXT = "#e6f7ff"
+MUTED = "#7194a6"
 
 
 class JarvisHUD:
-    """Thread-safe Tkinter HUD running on a background daemon thread."""
+    """Thread-safe fullscreen Tkinter HUD with animated particles."""
 
-    def __init__(self, title: str = "JARVIS HUD") -> None:
+    def __init__(self, title: str = "JARVIS COMMAND BRIDGE") -> None:
         self.title = title
         self.cmd_queue: queue.Queue = queue.Queue()
         self.state = "STANDBY"
@@ -46,27 +37,27 @@ class JarvisHUD:
         self._thread: threading.Thread | None = None
         self._ready = threading.Event()
         self.root = None
+        self.canvas = None
+        self.status_lbl = None
+        self.user_lbl = None
+        self.jarvis_lbl = None
+        self._particles: list[dict[str, float]] = []
+        self._phase = 0.0
 
     def start(self) -> None:
-        """Start the HUD window in a background thread."""
         self._thread = threading.Thread(target=self._run_gui, daemon=True, name="JarvisHUDThread")
         self._thread.start()
-        # Wait up to 1.5s for GUI initialization
         self._ready.wait(timeout=1.5)
 
     def set_state(self, new_state: str) -> None:
-        """Update reactor state: 'STANDBY', 'LISTENING', 'THINKING', 'SPEAKING'."""
         self.cmd_queue.put(("state", new_state.upper()))
 
     def set_transcript(self, user: str = "", jarvis: str = "") -> None:
-        """Update live speech transcript."""
         self.cmd_queue.put(("transcript", (user, jarvis)))
 
     def set_mute(self, muted: bool) -> None:
-        """Set mic mute indicator."""
         self.cmd_queue.put(("mute", muted))
 
-    # ---------------- GUI Thread Implementation ----------------
     def _run_gui(self) -> None:
         try:
             import tkinter as tk
@@ -78,241 +69,163 @@ class JarvisHUD:
 
         self.root = tk.Tk()
         self.root.title(self.title)
-        self.root.configure(bg=BG_COLOR)
-        self.root.overrideredirect(True)      # Borderless
-        self.root.attributes("-topmost", True) # Always on top
-        try:
-            self.root.attributes("-alpha", 0.92)  # Transparency
-        except Exception:
-            pass
+        self.root.configure(bg=BG)
+        self.root.attributes("-fullscreen", True)
+        self.root.attributes("-topmost", True)
+        self.root.bind("<Escape>", lambda _event: self.root.withdraw())
+        self.root.bind("<F11>", lambda _event: self._toggle_fullscreen())
 
-        # Position at top-right
-        screen_w = self.root.winfo_screenwidth()
-        w, h = 370, 160
-        x = screen_w - w - 24
-        y = 30
-        self.root.geometry(f"{w}x{h}+{x}+{y}")
+        self.width = self.root.winfo_screenwidth()
+        self.height = self.root.winfo_screenheight()
+        self.canvas = tk.Canvas(self.root, bg=BG, highlightthickness=0)
+        self.canvas.pack(fill="both", expand=True)
+        self._particles = self._make_particles()
 
-        # Dragging support
-        self._drag_data = {"x": 0, "y": 0}
+        self._font_display = tkfont.Font(family="Segoe UI Light", size=28)
+        self._font_title = tkfont.Font(family="Consolas", size=11, weight="bold")
+        self._font_body = tkfont.Font(family="Segoe UI", size=13)
+        self._font_mono = tkfont.Font(family="Consolas", size=10)
 
-        def _start_drag(event):
-            self._drag_data["x"] = event.x
-            self._drag_data["y"] = event.y
-
-        def _do_drag(event):
-            dx = event.x - self._drag_data["x"]
-            dy = event.y - self._drag_data["y"]
-            nx = self.root.winfo_x() + dx
-            ny = self.root.winfo_y() + dy
-            self.root.geometry(f"+{nx}+{ny}")
-
-        self.root.bind("<Button-1>", _start_drag)
-        self.root.bind("<B1-Motion>", _do_drag)
-
-        # Outer border frame
-        outer_frame = tk.Frame(self.root, bg=BORDER_COLOR, bd=1)
-        outer_frame.pack(fill="both", expand=True, padx=1, pady=1)
-
-        inner_frame = tk.Frame(outer_frame, bg=BG_COLOR)
-        inner_frame.pack(fill="both", expand=True)
-
-        # Top title bar
-        top_bar = tk.Frame(inner_frame, bg=BG_COLOR)
-        top_bar.pack(fill="x", padx=8, pady=(4, 0))
-
-        title_lbl = tk.Label(
-            top_bar,
-            text="JARVIS  //  MARK 85",
-            font=("Segoe UI", 9, "bold"),
-            fg=ACCENT_CYAN,
-            bg=BG_COLOR,
-        )
-        title_lbl.pack(side="left")
-
-        # Status badge
-        self.status_lbl = tk.Label(
-            top_bar,
-            text="[ STANDBY ]",
-            font=("Consolas", 8, "bold"),
-            fg=ACCENT_GREEN,
-            bg=BG_COLOR,
-        )
-        self.status_lbl.pack(side="left", padx=8)
-
-        # Close / hide button
-        close_btn = tk.Label(
-            top_bar,
-            text="×",
-            font=("Segoe UI", 11, "bold"),
-            fg="#718096",
-            bg=BG_COLOR,
-            cursor="hand2",
-        )
-        close_btn.pack(side="right", padx=2)
-        close_btn.bind("<Button-1>", lambda e: self.root.withdraw())
-
-        # Main content area (Reactor Orb + Transcript)
-        content_frame = tk.Frame(inner_frame, bg=BG_COLOR)
-        content_frame.pack(fill="both", expand=True, padx=8, pady=4)
-
-        # Canvas for Arc Reactor animation
-        self.canvas = tk.Canvas(
-            content_frame,
-            width=70,
-            height=70,
-            bg=BG_COLOR,
-            highlightthickness=0,
-        )
-        self.canvas.pack(side="left", padx=(0, 8))
-
-        # Transcript text area
-        text_frame = tk.Frame(content_frame, bg=BG_COLOR)
-        text_frame.pack(side="left", fill="both", expand=True)
-
-        self.user_lbl = tk.Label(
-            text_frame,
-            text="You: ...",
-            font=("Segoe UI", 8),
-            fg="#94A3B8",
-            bg=BG_COLOR,
-            anchor="w",
-            justify="left",
-            wraplength=260,
-        )
-        self.user_lbl.pack(fill="x", pady=(2, 2))
-
-        self.jarvis_lbl = tk.Label(
-            text_frame,
-            text="Jarvis: Standing by, boss.",
-            font=("Segoe UI", 8, "italic"),
-            fg=TEXT_COLOR,
-            bg=BG_COLOR,
-            anchor="w",
-            justify="left",
-            wraplength=260,
-        )
-        self.jarvis_lbl.pack(fill="both", expand=True)
-
-        # Animation state variables
-        self.angle = 0.0
-        self.pulse = 0.0
-
-        # Register message polling and animation loops
         self._ready.set()
         self._schedule_update()
-        self._animate_reactor()
-
+        self._animate()
         try:
             self.root.mainloop()
         except Exception:
             pass
 
+    def _toggle_fullscreen(self) -> None:
+        if self.root:
+            current = bool(self.root.attributes("-fullscreen"))
+            self.root.attributes("-fullscreen", not current)
+
+    def _make_particles(self) -> list[dict[str, float]]:
+        count = max(90, min(220, int((self.width * self.height) / 14000)))
+        return [
+            {
+                "x": random.uniform(0, self.width),
+                "y": random.uniform(0, self.height),
+                "speed": random.uniform(0.08, 0.42),
+                "size": random.choice((1, 1, 1, 2)),
+                "phase": random.uniform(0, math.tau),
+            }
+            for _ in range(count)
+        ]
+
     def _schedule_update(self) -> None:
-        """Poll incoming commands from queue."""
         if not self.root:
             return
-
         try:
-            while not self.cmd_queue.empty():
+            while True:
                 cmd, val = self.cmd_queue.get_nowait()
                 if cmd == "state":
                     self.state = val
-                    self._update_status_label()
                 elif cmd == "transcript":
                     user, jarvis = val
                     if user:
-                        self.user_lbl.config(text=f"You: {user[:65]}")
+                        self.user_text = user
                     if jarvis:
-                        self.jarvis_lbl.config(text=f"Jarvis: {jarvis[:90]}")
+                        self.jarvis_text = jarvis
                 elif cmd == "mute":
                     self.is_muted = val
-                    self._update_status_label()
                 elif cmd == "show":
                     self.root.deiconify()
                 elif cmd == "hide":
                     self.root.withdraw()
+        except queue.Empty:
+            pass
         except Exception:
             pass
-
+        self._update_status()
         self.root.after(40, self._schedule_update)
 
-    def _update_status_label(self) -> None:
-        if self.is_muted:
-            self.status_lbl.config(text="[ MUTED ]", fg=ACCENT_RED)
-        elif self.state == "LISTENING":
-            self.status_lbl.config(text="[ LISTENING ]", fg=ACCENT_GOLD)
-        elif self.state == "THINKING":
-            self.status_lbl.config(text="[ PROCESSING ]", fg=ACCENT_PURPLE)
-        elif self.state == "SPEAKING":
-            self.status_lbl.config(text="[ SPEAKING ]", fg=ACCENT_CYAN)
-        else:
-            self.status_lbl.config(text="[ STANDBY ]", fg=ACCENT_GREEN)
+    def _update_status(self) -> None:
+        if self.status_lbl:
+            label, color = self._status_text()
+            self.status_lbl.config(text=label, fg=color)
 
-    def _animate_reactor(self) -> None:
-        """Render rotating Arc Reactor geometry on Tkinter Canvas."""
+    def _status_text(self) -> tuple[str, str]:
+        if self.is_muted:
+            return "MUTED", RED
+        return {
+            "LISTENING": ("LISTENING", GOLD),
+            "THINKING": ("PROCESSING", PURPLE),
+            "SPEAKING": ("SPEAKING", CYAN),
+        }.get(self.state, ("STANDBY", GREEN))
+
+    def _accent(self) -> str:
+        return self._status_text()[1]
+
+    def _panel(self, x1: float, y1: float, x2: float, y2: float, title: str) -> None:
+        accent = self._accent()
+        self.canvas.create_rectangle(x1, y1, x2, y2, fill=PANEL, outline="#123247", width=1)
+        self.canvas.create_line(x1, y1, x1 + 86, y1, fill=accent, width=2)
+        self.canvas.create_text(x1 + 18, y1 + 18, text=title, anchor="w", fill=accent, font=self._font_title)
+
+    def _draw_reactor(self, cx: float, cy: float) -> None:
+        accent = self._accent()
+        self._phase += 0.045
+        pulse = math.sin(self._phase * (2.0 if self.state != "STANDBY" else 0.7))
+        spin = self._phase * (5.0 if self.state == "THINKING" else 1.0)
+
+        for radius, color, width in ((210, "#082638", 1), (178, CYAN_DIM, 1), (142, accent, 2)):
+            self.canvas.create_oval(cx - radius, cy - radius, cx + radius, cy + radius, outline=color, width=width)
+        for i in range(12):
+            angle = spin + i * math.tau / 12
+            inner, outer = 154, 174
+            self.canvas.create_line(
+                cx + math.cos(angle) * inner,
+                cy + math.sin(angle) * inner,
+                cx + math.cos(angle) * outer,
+                cy + math.sin(angle) * outer,
+                fill=accent if i % 3 == 0 else "#1a6175",
+                width=2,
+            )
+        glow = 62 + pulse * 7
+        self.canvas.create_oval(cx - glow * 1.6, cy - glow * 1.6, cx + glow * 1.6, cy + glow * 1.6, outline="#0b526d", width=2)
+        self.canvas.create_oval(cx - glow, cy - glow, cx + glow, cy + glow, fill="#08344b", outline=accent, width=2)
+        self.canvas.create_oval(cx - 30, cy - 30, cx + 30, cy + 30, fill=accent, outline="#e9fdff", width=2)
+        self.canvas.create_oval(cx - 8, cy - 8, cx + 8, cy + 8, fill="#ffffff", outline="")
+
+    def _animate(self) -> None:
         if not self.root or not self.canvas:
             return
-
         self.canvas.delete("all")
-        cx, cy = 35, 35
+        width, height = self.width, self.height
+        self.canvas.create_rectangle(0, 0, width, height, fill=BG, outline="")
+        for particle in self._particles:
+            particle["y"] -= particle["speed"]
+            if particle["y"] < -4:
+                particle["y"] = height + 4
+                particle["x"] = random.uniform(0, width)
+            shimmer = (math.sin(self._phase + particle["phase"]) + 1) / 2
+            color = "#1b6076" if shimmer < 0.7 else "#54d9ed"
+            size = particle["size"]
+            self.canvas.create_oval(particle["x"] - size, particle["y"] - size, particle["x"] + size, particle["y"] + size, fill=color, outline="")
 
-        self.angle = (self.angle + (6.0 if self.state == "THINKING" else 1.5)) % 360
-        self.pulse += 0.12
-        sin_p = math.sin(self.pulse)
+        # scanlines and framing
+        for y in range(0, height, 7):
+            self.canvas.create_line(0, y, width, y, fill="#06111d")
+        margin = 34
+        self.canvas.create_rectangle(margin, margin, width - margin, height - margin, outline="#0c2a3b")
+        self.canvas.create_text(margin + 24, margin + 24, text="JARVIS", anchor="w", fill=TEXT, font=self._font_display)
+        self.canvas.create_text(margin + 26, margin + 62, text="PERSONAL INTELLIGENCE // COMMAND BRIDGE", anchor="w", fill=MUTED, font=self._font_mono)
+        self.canvas.create_text(width - margin - 24, margin + 26, text=time.strftime("%H:%M:%S"), anchor="e", fill=CYAN, font=self._font_mono)
+        self.canvas.create_text(width - margin - 24, margin + 50, text="MARK 85  /  ONLINE", anchor="e", fill=GREEN, font=self._font_mono)
 
-        # Color scheme based on state
-        if self.state == "LISTENING":
-            ring_color = ACCENT_GOLD
-            core_color = "#FFAA00"
-            radius_mod = sin_p * 2.5
-        elif self.state == "THINKING":
-            ring_color = ACCENT_PURPLE
-            core_color = ACCENT_CYAN
-            radius_mod = 1.0
-        elif self.state == "SPEAKING":
-            ring_color = ACCENT_CYAN
-            core_color = "#38BDF8"
-            radius_mod = math.fabs(sin_p) * 4.0
-        else:
-            ring_color = BORDER_COLOR
-            core_color = "#0284C7"
-            radius_mod = sin_p * 1.0
+        cx, cy = width / 2, height / 2 + 30
+        self._draw_reactor(cx, cy)
+        self.canvas.create_text(cx, cy + 245, text="J A R V I S", fill=TEXT, font=self._font_title)
+        self.canvas.create_text(cx, cy + 268, text="VOICE INTERFACE ACTIVE", fill=self._accent(), font=self._font_mono)
 
-        # Outer ring
-        r_outer = 28 + radius_mod
-        self.canvas.create_oval(
-            cx - r_outer, cy - r_outer, cx + r_outer, cy + r_outer,
-            outline=ring_color, width=1.5
-        )
-
-        # Middle segmented ring (rotates)
-        r_mid = 20
-        rad = math.radians(self.angle)
-        for i in range(6):
-            a = rad + i * (math.pi / 3)
-            x1 = cx + (r_mid - 3) * math.cos(a)
-            y1 = cy + (r_mid - 3) * math.sin(a)
-            x2 = cx + (r_mid + 3) * math.cos(a)
-            y2 = cy + (r_mid + 3) * math.sin(a)
-            self.canvas.create_line(x1, y1, x2, y2, fill=ring_color, width=2)
-
-        # Inner pulsing reactor core
-        r_core = 11 + (sin_p * 1.5 if self.state in ("LISTENING", "SPEAKING") else 0)
-        self.canvas.create_oval(
-            cx - r_core, cy - r_core, cx + r_core, cy + r_core,
-            fill=core_color, outline=ACCENT_CYAN, width=1
-        )
-
-        # Center highlight dot
-        self.canvas.create_oval(
-            cx - 3, cy - 3, cx + 3, cy + 3,
-            fill="#FFFFFF", outline=""
-        )
-
-        # Loop at ~30 FPS (33ms) for super low CPU usage (<0.5%)
-        self.root.after(33, self._animate_reactor)
+        left_x, right_x = margin + 36, width - margin - 330
+        self._panel(left_x, height - 255, left_x + 300, height - 82, "INCOMING // YOU")
+        self.canvas.create_text(left_x + 18, height - 210, text=self.user_text[-125:] or "Awaiting voice input...", anchor="nw", fill=TEXT if self.user_text else MUTED, font=self._font_body, width=264)
+        self._panel(right_x, height - 255, right_x + 294, height - 82, "OUTGOING // JARVIS")
+        self.canvas.create_text(right_x + 18, height - 210, text=self.jarvis_text[-125:], anchor="nw", fill=TEXT, font=self._font_body, width=258)
+        label, color = self._status_text()
+        self.canvas.create_text(cx, height - 70, text=f"●  {label}", fill=color, font=self._font_title)
+        self.root.after(33, self._animate)
 
 
-# Global HUD instance
 hud = JarvisHUD()

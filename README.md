@@ -81,18 +81,20 @@ JARVIS streams real-time speech directly into whatever window currently has focu
 
 ---
 
-## 🖥️ Futuristic Desktop Arc Reactor HUD (`core/hud.py`)
+## 🖥️ Fullscreen JARVIS Command Bridge (`core/hud.py`)
 
-A lightweight, frameless, semi-transparent (`alpha = 0.92`) Tkinter desktop widget:
-* **Animated Arc Reactor**: Concentric rotating rings and a pulsing reactor core running at ~30 FPS with negligible CPU impact (<0.5%).
+A fullscreen, always-on-top Tkinter command bridge with a cinematic particle
+field and a central Arc Reactor:
+* **Particle field**: Slow-moving cyan star particles, scanlines, framing, and live clock/online telemetry.
+* **Animated Arc Reactor**: Concentric rotating rings and a pulsing reactor core running at ~30 FPS.
 * **Visual State Transitions**:
   * `[ STANDBY ]`: Cyan ambient glow (`#00F2FE`).
   * `[ LISTENING ]`: Active gold/amber pulse (`#FFD166`).
   * `[ PROCESSING ]`: Fast-spinning purple reactor rings (`#A855F7`).
   * `[ SPEAKING ]`: Undulating energy waveform (`#00F2FE`).
   * `[ MUTED ]`: Red indicator badge (`#EF476F`).
-* **Live Dual-Line Transcript**: Displays user speech and JARVIS spoken responses in real-time.
-* **HUD Voice Controls**: *"Show HUD"*, *"Hide HUD"*, *"Mute mic"*, *"Unmute mic"*.
+* **Live transcript panels**: Incoming user speech and outgoing JARVIS responses remain visible at the bottom of the screen.
+* **Controls**: Press `Esc` to hide the bridge, `F11` to toggle fullscreen, or use *"Show HUD"* / *"Hide HUD"* / *"Mute mic"* / *"Unmute mic"*.
 
 ---
 
