@@ -39,6 +39,7 @@ safety:
     - browser_search
     - browser_fetch
     - ocr_screenshot
+    - set_brightness
     - system_status
 
   # Tier 2: System-altering / destructive actions - confirmation required or 5s voice cancel window
@@ -60,6 +61,8 @@ safety:
     - run_powershell
     - ui_click
     - ui_type
+    - wifi_toggle
+    - bluetooth_toggle
 
   # Tier 3: Blocked actions - strictly prohibited under all circumstances
   tier3_blocked:

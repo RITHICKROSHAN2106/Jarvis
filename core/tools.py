@@ -103,6 +103,9 @@ class SafetyManager:
             {"name": "browser_fetch", "tier": self.get_tier("browser_fetch"), "parameters": {"url": "string"}},
             {"name": "ocr_screenshot", "tier": self.get_tier("ocr_screenshot"), "parameters": {"path": "string"}},
             {"name": "system_status", "tier": self.get_tier("system_status"), "parameters": {}},
+            {"name": "set_brightness", "tier": self.get_tier("set_brightness"), "parameters": {"percent": "integer"}},
+            {"name": "wifi_toggle", "tier": self.get_tier("wifi_toggle"), "parameters": {"interface": "string", "enabled": "boolean"}},
+            {"name": "bluetooth_toggle", "tier": self.get_tier("bluetooth_toggle"), "parameters": {"name": "string", "enabled": "boolean"}},
         ]
 
     def is_path_blocked(self, target_path: str) -> bool:
@@ -402,6 +405,42 @@ class SafetyManager:
                 results.append(f"{name}: unavailable ({exc})")
         self.log_action("system_status", 1, {}, "EXECUTED")
         return "\n\n".join(results)
+
+    def set_brightness(self, percent: int) -> str:
+        try:
+            value = max(0, min(100, int(percent)))
+            import screen_brightness_control as sbc
+            sbc.set_brightness(value)
+            self.log_action("set_brightness", 2, {"percent": value}, "EXECUTED")
+            return f"Brightness set to {value} percent, boss."
+        except (ImportError, OSError, ValueError, RuntimeError) as exc:
+            self.log_action("set_brightness", 2, {"percent": percent}, "FAILED", str(exc))
+            return f"Brightness control failed: {exc}"
+
+    def wifi_toggle(self, interface: str, enabled: bool) -> str:
+        state = "enabled" if enabled else "disabled"
+        command = ["netsh", "interface", "set", "interface", f"name={interface}", f"admin={state}"]
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=10, check=False)
+            output = (result.stdout or result.stderr).strip()
+            status = "EXECUTED" if result.returncode == 0 else "FAILED"
+            self.log_action("wifi_toggle", 2, {"interface": interface, "enabled": enabled}, status, f"exit_code={result.returncode}")
+            return output or f"Wi-Fi interface operation exit code {result.returncode}."
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return f"Wi-Fi control failed: {exc}"
+
+    def bluetooth_toggle(self, name: str, enabled: bool) -> str:
+        action = "Enable-PnpDevice" if enabled else "Disable-PnpDevice"
+        escaped = name.replace("'", "''")
+        command = f"Get-PnpDevice -Class Bluetooth | Where-Object {{$_.FriendlyName -like '*{escaped}*'}} | {action} -Confirm:$false"
+        try:
+            result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command], capture_output=True, text=True, timeout=15, check=False)
+            output = (result.stdout or result.stderr).strip()
+            status = "EXECUTED" if result.returncode == 0 else "FAILED"
+            self.log_action("bluetooth_toggle", 2, {"name": name, "enabled": enabled}, status, f"exit_code={result.returncode}")
+            return output or f"Bluetooth operation exit code {result.returncode}. It may require administrator approval."
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return f"Bluetooth control failed: {exc}"
 
     def open_path(self, path: str) -> str:
         abs_path = os.path.abspath(os.path.expandvars(os.path.expanduser(path)))
@@ -731,6 +770,12 @@ class SafetyManager:
             return self.ocr_screenshot(args.get("path", ""))
         elif action == "system_status":
             return self.system_status()
+        elif action == "set_brightness":
+            return self.set_brightness(args.get("percent", 50))
+        elif action == "wifi_toggle":
+            return self.wifi_toggle(args.get("interface", "Wi-Fi"), bool(args.get("enabled", True)))
+        elif action == "bluetooth_toggle":
+            return self.bluetooth_toggle(args.get("name", ""), bool(args.get("enabled", True)))
 
         self.log_action(action, tier, args, "UNKNOWN")
         return f"Unknown tool '{action}', boss."
