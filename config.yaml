@@ -31,6 +31,7 @@ safety:
     - create_folder
     - list_running
     - open_path
+    - file_info
     - get_system_stats
 
   # Tier 2: System-altering / destructive actions - confirmation required or 5s voice cancel window
@@ -45,6 +46,8 @@ safety:
     - write_file
     - copy_file
     - move_file
+    - rename_file
+    - append_file
     - run_powershell
 
   # Tier 3: Blocked actions - strictly prohibited under all circumstances

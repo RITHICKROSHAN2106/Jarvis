@@ -1362,8 +1362,16 @@ def execute_action(action_str: str) -> str | None:
         return tools.execute_tool("create_folder", {"path": arg})
     if verb == "open_path":
         return tools.execute_tool("open_path", {"path": arg})
+    if verb == "file_info":
+        return tools.execute_tool("file_info", {"path": arg})
     if verb == "list_running":
         return tools.execute_tool("list_running", {})
+    if verb == "append_file":
+        path, _, content = arg.partition(" ")
+        return tools.execute_tool("append_file", {"path": path, "content": content})
+    if verb == "rename_file":
+        path, _, new_name = arg.partition(" ")
+        return tools.execute_tool("rename_file", {"path": path, "new_name": new_name})
     if verb == "search_google":
         open_url("https://www.google.com/search?q=" + urllib.parse.quote_plus(arg))
         return f"Searching Google for {arg}, {USER_TITLE}."
@@ -1464,6 +1472,9 @@ def action_is_requested(user_text: str, action_str: str) -> bool:
         "create_folder": ("create", "make"),
         "open_path": ("open", "launch"),
         "list_running": ("list", "show"),
+        "file_info": ("info", "inspect", "show"),
+        "append_file": ("append", "add"),
+        "rename_file": ("rename",),
     }
     required_phrases = requirements.get(verb)
     return bool(required_phrases and any(phrase in user for phrase in required_phrases))
@@ -1514,10 +1525,18 @@ def run_builtin(text: str) -> str | None:
 
     # Undo
     if t in ("undo", "undo that", "undo last action"):
-        if tools.undo_stack:
-            last = tools.undo_stack.pop()
-            return f"Last action was {last.get('action')} on {os.path.basename(last.get('path', ''))}. The item is safe in your Recycle Bin, {USER_TITLE}."
-        return f"Nothing in the undo buffer to reverse, {USER_TITLE}."
+        return tools.undo_last_action()
+    for prefix in ("file info ", "inspect file ", "inspect path "):
+        if t.startswith(prefix):
+            return tools.execute_tool("file_info", {"path": text[len(prefix):].strip()})
+    for prefix in ("append to file ", "append file "):
+        if t.startswith(prefix):
+            path, _, content = text[len(prefix):].partition(" ")
+            return tools.execute_tool("append_file", {"path": path, "content": content})
+    for prefix in ("rename file ", "rename "):
+        if t.startswith(prefix):
+            path, _, new_name = text[len(prefix):].partition(" to ")
+            return tools.execute_tool("rename_file", {"path": path.strip(), "new_name": new_name.strip()})
 
     # HUD Controls
     if any(p in t for p in ("show hud", "open hud", "display hud", "bring up hud")):

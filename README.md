@@ -275,5 +275,11 @@ The structured file/process registry also supports bounded `find_files`,
 operations. Copy and move require confirmation and refuse to overwrite an
 existing destination; searches are capped at 100 results.
 
+It also supports `file_info`, `append_file`, and `rename_file`. Move, copy, and
+rename operations are recorded in the undo journal; “undo that” reverses them
+when the original state is still safe to restore. Recycle Bin deletion remains
+recoverable through Windows Explorer rather than pretending it can be restored
+silently.
+
 Use `python jarvis.py --tools` to inspect the machine-readable safety-tiered
 tool catalog exposed to integrations and future tool-calling models.

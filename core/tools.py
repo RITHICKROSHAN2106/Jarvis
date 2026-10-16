@@ -80,9 +80,12 @@ class SafetyManager:
             {"name": "find_files", "tier": self.get_tier("find_files"), "parameters": {"root": "string", "name": "string", "content": "string", "limit": "integer"}},
             {"name": "create_folder", "tier": self.get_tier("create_folder"), "parameters": {"path": "string"}},
             {"name": "open_path", "tier": self.get_tier("open_path"), "parameters": {"path": "string"}},
+            {"name": "file_info", "tier": self.get_tier("file_info"), "parameters": {"path": "string"}},
             {"name": "list_running", "tier": self.get_tier("list_running"), "parameters": {}},
             {"name": "copy_file", "tier": self.get_tier("copy_file"), "parameters": {"source": "string", "destination": "string"}},
             {"name": "move_file", "tier": self.get_tier("move_file"), "parameters": {"source": "string", "destination": "string"}},
+            {"name": "rename_file", "tier": self.get_tier("rename_file"), "parameters": {"path": "string", "new_name": "string"}},
+            {"name": "append_file", "tier": self.get_tier("append_file"), "parameters": {"path": "string", "content": "string"}},
             {"name": "delete_file", "tier": self.get_tier("delete_file"), "parameters": {"path": "string"}},
             {"name": "run_powershell", "tier": self.get_tier("run_powershell"), "parameters": {"command": "string", "timeout_seconds": "integer"}},
         ]
@@ -255,6 +258,79 @@ class SafetyManager:
             self.log_action("open_path", 1, {"path": abs_path}, "FAILED", str(exc))
             return f"Could not open path: {exc}"
 
+    def file_info(self, path: str) -> str:
+        abs_path = os.path.abspath(path)
+        try:
+            stat = os.stat(abs_path)
+            kind = "directory" if os.path.isdir(abs_path) else "file"
+            self.log_action("file_info", 1, {"path": abs_path}, "EXECUTED")
+            return (
+                f"{kind}: {abs_path}\n"
+                f"size: {stat.st_size} bytes\n"
+                f"modified: {dt.datetime.fromtimestamp(stat.st_mtime).isoformat(timespec='seconds')}"
+            )
+        except OSError as exc:
+            self.log_action("file_info", 1, {"path": abs_path}, "FAILED", str(exc))
+            return f"Could not inspect path: {exc}"
+
+    def append_file(self, file_path: str, content: str) -> str:
+        abs_path = os.path.abspath(file_path)
+        if self.is_path_blocked(abs_path):
+            self.log_action("append_file", 3, {"path": abs_path}, "BLOCKED", "Protected system path")
+            return "Action blocked, boss. Cannot modify protected system paths."
+        try:
+            with open(abs_path, "a", encoding="utf-8") as handle:
+                handle.write(content)
+            self.log_action("append_file", 2, {"path": abs_path, "chars": len(content)}, "EXECUTED")
+            return f"Appended {len(content)} characters to {os.path.basename(abs_path)}, boss."
+        except OSError as exc:
+            self.log_action("append_file", 2, {"path": abs_path}, "FAILED", str(exc))
+            return f"Append failed: {exc}"
+
+    def rename_file(self, path: str, new_name: str) -> str:
+        source = os.path.abspath(path)
+        destination = os.path.join(os.path.dirname(source), os.path.basename(new_name))
+        if self.is_path_blocked(source) or self.is_path_blocked(destination):
+            self.log_action("rename_file", 3, {"path": source, "new_name": new_name}, "BLOCKED", "Protected system path")
+            return "Action blocked, boss. Protected system paths cannot be renamed."
+        if os.path.exists(destination):
+            return "Rename cancelled: destination already exists."
+        try:
+            os.rename(source, destination)
+            self.undo_stack.append({"action": "rename_file", "source": source, "destination": destination, "timestamp": dt.datetime.now().isoformat()})
+            self.log_action("rename_file", 2, {"source": source, "destination": destination}, "EXECUTED")
+            return f"Renamed to {os.path.basename(destination)}, boss."
+        except OSError as exc:
+            self.log_action("rename_file", 2, {"source": source, "destination": destination}, "FAILED", str(exc))
+            return f"Rename failed: {exc}"
+
+    def undo_last_action(self) -> str:
+        if not self.undo_stack:
+            return "Nothing in the undo buffer to reverse, boss."
+        action = self.undo_stack.pop()
+        kind = action.get("action")
+        try:
+            if kind in {"move_file", "rename_file"}:
+                source, destination = action["source"], action["destination"]
+                if os.path.exists(destination) and not os.path.exists(source):
+                    os.rename(destination, source)
+                    self.log_action("undo", 2, action, "EXECUTED", f"reversed {kind}")
+                    return f"Undid {kind}, boss."
+            elif kind == "copy_file":
+                destination = action["destination"]
+                if os.path.exists(destination):
+                    os.remove(destination)
+                    self.log_action("undo", 2, action, "EXECUTED", "removed copied file")
+                    return "Undid the copy, boss."
+            elif kind == "delete_file":
+                self.log_action("undo", 2, action, "UNAVAILABLE", "Recycle Bin restore requires shell UI")
+                return "The item is in the Recycle Bin. Restore it there, boss."
+            self.log_action("undo", 2, action, "FAILED", "state changed or source unavailable")
+            return "I could not safely undo the last action, boss."
+        except OSError as exc:
+            self.log_action("undo", 2, action, "FAILED", str(exc))
+            return f"Undo failed safely: {exc}"
+
     def copy_file(self, source: str, destination: str) -> str:
         src = os.path.abspath(source)
         dst = os.path.abspath(destination)
@@ -386,10 +462,16 @@ class SafetyManager:
             return self.list_running()
         elif action == "open_path":
             return self.open_path(args.get("path", ""))
+        elif action == "file_info":
+            return self.file_info(args.get("path", ""))
         elif action == "copy_file":
             return self.copy_file(args.get("source", ""), args.get("destination", ""))
         elif action == "move_file":
             return self.move_file(args.get("source", ""), args.get("destination", ""))
+        elif action == "rename_file":
+            return self.rename_file(args.get("path", ""), args.get("new_name", ""))
+        elif action == "append_file":
+            return self.append_file(args.get("path", ""), args.get("content", ""))
         elif action == "run_powershell":
             return self.run_powershell(args.get("command", ""), args.get("timeout_seconds", 30))
 
