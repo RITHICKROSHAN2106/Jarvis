@@ -12,4 +12,6 @@ pyyaml
 pyperclip
 edge-tts
 playsound3
+pywinauto
+pytesseract
 # anthropic   # only needed if you set LLM_PROVIDER = "anthropic" (paid)

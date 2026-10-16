@@ -33,6 +33,13 @@ safety:
     - open_path
     - file_info
     - get_system_stats
+    - screenshot
+    - ui_inspect
+    - browser_open
+    - browser_search
+    - browser_fetch
+    - ocr_screenshot
+    - system_status
 
   # Tier 2: System-altering / destructive actions - confirmation required or 5s voice cancel window
   tier2_confirm:
@@ -51,6 +58,8 @@ safety:
     - zip_files
     - unzip_file
     - run_powershell
+    - ui_click
+    - ui_type
 
   # Tier 3: Blocked actions - strictly prohibited under all circumstances
   tier3_blocked:

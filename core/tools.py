@@ -7,12 +7,14 @@ and an undo stack for reversible operations.
 from __future__ import annotations
 
 import datetime as dt
+import html.parser
 import logging
 import os
 import re
 import shutil
 import subprocess
 import sys
+import urllib.request
 import zipfile
 from logging.handlers import RotatingFileHandler
 from typing import Any, Callable
@@ -92,6 +94,15 @@ class SafetyManager:
             {"name": "kill_process", "tier": self.get_tier("kill_process"), "parameters": {"pid": "integer"}},
             {"name": "delete_file", "tier": self.get_tier("delete_file"), "parameters": {"path": "string"}},
             {"name": "run_powershell", "tier": self.get_tier("run_powershell"), "parameters": {"command": "string", "timeout_seconds": "integer"}},
+            {"name": "screenshot", "tier": self.get_tier("screenshot"), "parameters": {"path": "string"}},
+            {"name": "ui_inspect", "tier": self.get_tier("ui_inspect"), "parameters": {"title": "string"}},
+            {"name": "ui_click", "tier": self.get_tier("ui_click"), "parameters": {"title": "string", "control": "string"}},
+            {"name": "ui_type", "tier": self.get_tier("ui_type"), "parameters": {"title": "string", "control": "string", "text": "string"}},
+            {"name": "browser_open", "tier": self.get_tier("browser_open"), "parameters": {"url": "string"}},
+            {"name": "browser_search", "tier": self.get_tier("browser_search"), "parameters": {"query": "string"}},
+            {"name": "browser_fetch", "tier": self.get_tier("browser_fetch"), "parameters": {"url": "string"}},
+            {"name": "ocr_screenshot", "tier": self.get_tier("ocr_screenshot"), "parameters": {"path": "string"}},
+            {"name": "system_status", "tier": self.get_tier("system_status"), "parameters": {}},
         ]
 
     def is_path_blocked(self, target_path: str) -> bool:
@@ -249,6 +260,148 @@ class SafetyManager:
         except (OSError, subprocess.TimeoutExpired) as exc:
             self.log_action("list_running", 1, {}, "FAILED", str(exc))
             return f"Could not list running processes: {exc}"
+
+    def screenshot(self, path: str = "") -> str:
+        target = os.path.abspath(path or os.path.join(BASE_DIR, "data", "screenshots", f"screenshot-{dt.datetime.now():%Y%m%d-%H%M%S}.png"))
+        try:
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            import pyautogui
+            pyautogui.screenshot(target)
+            self.log_action("screenshot", 1, {"path": target}, "EXECUTED")
+            return f"Screenshot saved to {target}, boss."
+        except (OSError, ImportError) as exc:
+            self.log_action("screenshot", 1, {"path": target}, "FAILED", str(exc))
+            return f"Screenshot failed: {exc}"
+
+    def _ui_window(self, title: str):
+        try:
+            from pywinauto import Desktop
+        except ImportError:
+            return None, "UI Automation is not installed. Install pywinauto in the project environment, boss."
+        try:
+            window = Desktop(backend="uia").window(title_re=title)
+            if not window.exists(timeout=2):
+                return None, f"No visible window matched '{title}', boss."
+            return window, ""
+        except (OSError, RuntimeError) as exc:
+            return None, f"UI Automation could not inspect the window: {exc}"
+
+    def ui_inspect(self, title: str) -> str:
+        window, error = self._ui_window(title)
+        if error:
+            return error
+        try:
+            controls = []
+            for control in window.descendants():
+                name = control.window_text().strip()
+                if name:
+                    controls.append(f"{control.control_type()}:{name}")
+                if len(controls) >= 80:
+                    break
+            self.log_action("ui_inspect", 1, {"title": title}, "EXECUTED", f"count={len(controls)}")
+            return "\n".join(controls) or "No named controls found."
+        except (OSError, RuntimeError) as exc:
+            return f"UI inspection failed: {exc}"
+
+    def ui_click(self, title: str, control: str) -> str:
+        window, error = self._ui_window(title)
+        if error:
+            return error
+        try:
+            target = window.child_window(title=control)
+            target.wait("visible", timeout=3)
+            target.click_input()
+            self.log_action("ui_click", 2, {"title": title, "control": control}, "EXECUTED")
+            return f"Clicked '{control}', boss."
+        except (OSError, RuntimeError) as exc:
+            return f"UI click failed: {exc}"
+
+    def ui_type(self, title: str, control: str, text: str) -> str:
+        window, error = self._ui_window(title)
+        if error:
+            return error
+        try:
+            target = window.child_window(title=control)
+            target.wait("visible", timeout=3)
+            target.set_focus()
+            target.type_keys(text, with_spaces=True)
+            self.log_action("ui_type", 1, {"title": title, "control": control, "chars": len(text)}, "EXECUTED")
+            return f"Typed into '{control}', boss."
+        except (OSError, RuntimeError) as exc:
+            return f"UI typing failed: {exc}"
+
+    def browser_open(self, url: str) -> str:
+        if not re.match(r"^https?://", url, re.I):
+            return "Browser navigation requires an http or https URL, boss."
+        try:
+            import webbrowser
+            webbrowser.open(url)
+            self.log_action("browser_open", 1, {"url": url}, "EXECUTED")
+            return f"Opened {url}, boss."
+        except OSError as exc:
+            return f"Browser launch failed: {exc}"
+
+    def browser_search(self, query: str) -> str:
+        from urllib.parse import quote_plus
+        return self.browser_open("https://www.google.com/search?q=" + quote_plus(query))
+
+    def browser_fetch(self, url: str) -> str:
+        if not re.match(r"^https?://", url, re.I):
+            return "Page fetching requires an http or https URL, boss."
+        try:
+            request = urllib.request.Request(url, headers={"User-Agent": "JARVIS/1.0"})
+            with urllib.request.urlopen(request, timeout=15) as response:
+                raw = response.read(1_000_000).decode("utf-8", errors="replace")
+            class TextParser(html.parser.HTMLParser):
+                def __init__(self):
+                    super().__init__()
+                    self.parts = []
+                    self.skip = 0
+                def handle_starttag(self, tag, attrs):
+                    if tag.lower() in {"script", "style", "noscript"}:
+                        self.skip += 1
+                def handle_endtag(self, tag):
+                    if tag.lower() in {"script", "style", "noscript"} and self.skip:
+                        self.skip -= 1
+                def handle_data(self, data):
+                    if not self.skip and data.strip():
+                        self.parts.append(data.strip())
+            parser = TextParser()
+            parser.feed(raw)
+            text = re.sub(r"\s+", " ", " ".join(parser.parts)).strip()
+            self.log_action("browser_fetch", 1, {"url": url}, "EXECUTED", f"chars={len(text)}")
+            return text[:8000] or "The page contained no readable text."
+        except (OSError, ValueError, TimeoutError) as exc:
+            self.log_action("browser_fetch", 1, {"url": url}, "FAILED", str(exc))
+            return f"Page fetch failed: {exc}"
+
+    def ocr_screenshot(self, path: str) -> str:
+        try:
+            import pytesseract
+            from PIL import Image
+            text = pytesseract.image_to_string(Image.open(os.path.abspath(path)))
+            self.log_action("ocr_screenshot", 1, {"path": path}, "EXECUTED", f"chars={len(text)}")
+            return text[:8000] or "No text was detected."
+        except ImportError:
+            return "OCR is unavailable because pytesseract is not installed, boss."
+        except (OSError, RuntimeError) as exc:
+            return f"OCR failed: {exc}"
+
+    def system_status(self) -> str:
+        commands = {
+            "wifi": "netsh wlan show interfaces",
+            "battery": "Get-CimInstance Win32_Battery | Select-Object EstimatedChargeRemaining,BatteryStatus | Format-List",
+            "bluetooth": "Get-PnpDevice -Class Bluetooth -Status OK | Select-Object FriendlyName,Status | Format-Table -AutoSize",
+        }
+        results = []
+        for name, command in commands.items():
+            try:
+                result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command], capture_output=True, text=True, timeout=10, check=False)
+                results.append(f"{name}:\n{(result.stdout or result.stderr).strip()[:1200]}")
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                results.append(f"{name}: unavailable ({exc})")
+        self.log_action("system_status", 1, {}, "EXECUTED")
+        return "\n\n".join(results)
 
     def open_path(self, path: str) -> str:
         abs_path = os.path.abspath(os.path.expandvars(os.path.expanduser(path)))
@@ -560,6 +713,24 @@ class SafetyManager:
             return self.kill_process(args.get("pid", 0))
         elif action == "run_powershell":
             return self.run_powershell(args.get("command", ""), args.get("timeout_seconds", 30))
+        elif action == "screenshot":
+            return self.screenshot(args.get("path", ""))
+        elif action == "ui_inspect":
+            return self.ui_inspect(args.get("title", ""))
+        elif action == "ui_click":
+            return self.ui_click(args.get("title", ""), args.get("control", ""))
+        elif action == "ui_type":
+            return self.ui_type(args.get("title", ""), args.get("control", ""), args.get("text", ""))
+        elif action == "browser_open":
+            return self.browser_open(args.get("url", ""))
+        elif action == "browser_search":
+            return self.browser_search(args.get("query", ""))
+        elif action == "browser_fetch":
+            return self.browser_fetch(args.get("url", ""))
+        elif action == "ocr_screenshot":
+            return self.ocr_screenshot(args.get("path", ""))
+        elif action == "system_status":
+            return self.system_status()
 
         self.log_action(action, tier, args, "UNKNOWN")
         return f"Unknown tool '{action}', boss."

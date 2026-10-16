@@ -1848,6 +1848,7 @@ class Brain:
     """The thinking core with intelligent action execution."""
 
     def __init__(self) -> None:
+        self.cancel_event = threading.Event()
         self.client = None
         self.history: list[dict] = memory.get_history(max_turns=12)
         self.provider = LLM_PROVIDER
@@ -1872,6 +1873,12 @@ class Brain:
 
             self.client = OpenAI(base_url=cfg["base_url"], api_key=key)
         logger.info(f"Brain online: {self.provider} / {self.model}")
+
+    def request_cancel(self) -> None:
+        self.cancel_event.set()
+
+    def clear_cancel(self) -> None:
+        self.cancel_event.clear()
 
     def _complete(self) -> str:
         sys_prompt = memory.inject_system_prompt(SYSTEM_PROMPT)
@@ -1917,6 +1924,9 @@ class Brain:
         messages = [{"role": "system", "content": memory.inject_system_prompt(SYSTEM_PROMPT)}] + list(self.history)
         tool_names = {item["name"] for item in tools.tool_catalog()}
         for _ in range(8):
+            if self.cancel_event.is_set():
+                self.cancel_event.clear()
+                return "Tool plan cancelled, boss."
             response = self.client.chat.completions.create(
                 model=self.model,
                 max_tokens=220,
@@ -1943,6 +1953,9 @@ class Brain:
             }
             messages.append(assistant_message)
             for call in tool_calls:
+                if self.cancel_event.is_set():
+                    self.cancel_event.clear()
+                    return "Tool plan cancelled, boss."
                 name = call.function.name
                 if name not in tool_names:
                     result = f"Unknown tool '{name}'."
@@ -1964,6 +1977,7 @@ class Brain:
     def ask(self, text: str) -> str:
         if not self.client:
             return f"My language core is offline, {USER_TITLE}. Please set your API key."
+        self.clear_cancel()
         self.history.append({"role": "user", "content": text})
         memory.add_turn("user", text)
         try:
@@ -2022,6 +2036,7 @@ class Brain:
 
         self.history.append({"role": "user", "content": text})
         memory.add_turn("user", text)
+        self.clear_cancel()
 
         sys_prompt = memory.inject_system_prompt(SYSTEM_PROMPT)
         messages = [{"role": "system", "content": sys_prompt}] + self.history
@@ -2046,6 +2061,9 @@ class Brain:
                     model=self.model, max_tokens=220, temperature=0.2, messages=messages, stream=True
                 )
                 for chunk in stream:
+                    if self.cancel_event.is_set():
+                        self.cancel_event.clear()
+                        return "I stopped, boss."
                     delta = chunk.choices[0].delta.content if chunk.choices else ""
                     if delta:
                         buf += delta

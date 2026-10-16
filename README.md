@@ -297,3 +297,15 @@ loop of at most eight steps. Set `JARVIS_NATIVE_TOOLS=0` to disable it and use
 the legacy action-tag path. Tier 1 tools can run in the loop; Tier 2 calls are
 logged as pending and require an explicit confirmation path rather than being
 silently executed; Tier 3 calls remain blocked.
+
+The catalog also includes optional Windows UI Automation (`pywinauto`) for
+named-window inspection, clicking, and typing; browser URL/search launching;
+browser page text fetching for public HTTP(S) pages; screen capture and
+optional Tesseract OCR; and read-only Wi‑Fi, Bluetooth, and battery status. UI
+Automation reports an explicit installation or matching-window error instead
+of falling back to unreliable coordinates. Install dependencies from
+`requirements.txt` in the project `.venv`.
+
+JARVIS does not automate passwords, banking/payment submission, DRM or
+anti-cheat interfaces, or bypass UAC/elevation. Those surfaces require a
+human and remain intentionally outside the tool catalog.
