@@ -311,3 +311,13 @@ of falling back to unreliable coordinates. Install dependencies from
 JARVIS does not automate passwords, banking/payment submission, DRM or
 anti-cheat interfaces, or bypass UAC/elevation. Those surfaces require a
 human and remain intentionally outside the tool catalog.
+
+### WhatsApp messaging
+
+JARVIS supports an explicit confirmation workflow for WhatsApp Desktop:
+`message Alex on WhatsApp saying I will arrive at six`. It previews the exact
+recipient and message and waits for “confirm” or “cancel”. Only after
+confirmation does it open WhatsApp, search the named chat, type the message,
+and press Enter. It does not automate passwords, QR-code login, contact
+disambiguation, or hidden/background sending; verify the selected chat on
+screen before confirming.

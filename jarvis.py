@@ -214,6 +214,7 @@ QUIT_PHRASES = (
     "stop jarvis", "close jarvis"
 )
 pending_power_action: str | None = None
+pending_whatsapp_message: dict[str, str] | None = None
 
 SYSTEM_PROMPT = (
     f"You are {NAME}, a brilliant, witty, high-tech AI assistant modeled after Tony Stark's JARVIS. "
@@ -1340,6 +1341,74 @@ def handle_power_confirmation(text: str) -> str | None:
     return f"I did not hear a confirmation, {USER_TITLE}. The pending action was cancelled."
 
 
+def request_whatsapp_message(contact: str, message: str) -> str:
+    """Stage a WhatsApp message; never open or send it before confirmation."""
+    global pending_whatsapp_message
+    contact = re.sub(r"\s+", " ", contact).strip(" .,!?")
+    message = re.sub(r"\s+", " ", message).strip()
+    if not contact or not message:
+        return f"Please provide both the WhatsApp contact and message, {USER_TITLE}."
+    pending_whatsapp_message = {"contact": contact, "message": message}
+    tools.log_action(
+        "whatsapp_message",
+        2,
+        {"contact": contact, "chars": len(message)},
+        "PENDING",
+        "Awaiting explicit voice confirmation",
+    )
+    preview = message if len(message) <= 180 else message[:177] + "..."
+    return f"Ready to message {contact} on WhatsApp: “{preview}” Confirm, {USER_TITLE}?"
+
+
+def send_pending_whatsapp_message() -> str:
+    """Open WhatsApp, select the exact chat, type the message, and send it."""
+    global pending_whatsapp_message
+    pending = pending_whatsapp_message
+    pending_whatsapp_message = None
+    if not pending:
+        return f"There is no pending WhatsApp message, {USER_TITLE}."
+    contact = pending["contact"]
+    message = pending["message"]
+    try:
+        if not open_app("whatsapp"):
+            tools.log_action("whatsapp_message", 2, {"contact": contact}, "FAILED", "WhatsApp could not be opened")
+            return f"I could not open WhatsApp, {USER_TITLE}."
+        time.sleep(1.5)
+        pyautogui.hotkey("ctrl", "f")
+        time.sleep(0.4)
+        pyperclip.copy(contact)
+        pyautogui.hotkey("ctrl", "v")
+        time.sleep(0.8)
+        pyautogui.press("enter")
+        time.sleep(0.8)
+        pyperclip.copy(message)
+        pyautogui.hotkey("ctrl", "v")
+        time.sleep(0.3)
+        pyautogui.press("enter")
+        tools.log_action("whatsapp_message", 2, {"contact": contact, "chars": len(message)}, "EXECUTED")
+        return f"Message sent to {contact} on WhatsApp, {USER_TITLE}."
+    except (OSError, RuntimeError) as exc:
+        tools.log_action("whatsapp_message", 2, {"contact": contact}, "FAILED", str(exc))
+        return f"WhatsApp messaging failed: {exc}"
+
+
+def handle_whatsapp_confirmation(text: str) -> str | None:
+    """Resolve a staged WhatsApp message from a concise confirmation or cancellation."""
+    global pending_whatsapp_message
+    if pending_whatsapp_message is None:
+        return None
+    normalized = re.sub(r"[^a-z ]", "", text.lower()).strip()
+    if re.search(r"\b(confirm|confirmed|yes|proceed|send)\b", normalized) or "do it" in normalized:
+        return send_pending_whatsapp_message()
+    if re.search(r"\b(cancel|no|abort|stop)\b", normalized):
+        pending = pending_whatsapp_message
+        pending_whatsapp_message = None
+        tools.log_action("whatsapp_message", 2, {"contact": pending["contact"]}, "CANCELLED", "User denied confirmation")
+        return f"WhatsApp message cancelled, {USER_TITLE}."
+    pending_whatsapp_message = None
+    return f"I did not hear a confirmation, {USER_TITLE}. The WhatsApp message was cancelled."
+
+
 def execute_action(action_str: str) -> str | None:
     """Execute an action requested either locally or by the LLM Brain action tags."""
     action_str = action_str.strip()
@@ -1506,6 +1575,20 @@ def run_builtin(text: str) -> str | None:
 
     t = text.lower().strip(" .!?,")
     now = dt.datetime.now()
+
+    whatsapp_match = re.match(
+        r"(?:send|message|text)\s+(?:a\s+)?(?:whatsapp\s+)?message\s+to\s+(.+?)\s+(?:on\s+whatsapp\s+)?(?:saying|that says|with the message)\s+(.+)$",
+        text.strip(),
+        re.IGNORECASE,
+    )
+    if not whatsapp_match:
+        whatsapp_match = re.match(
+            r"(?:message|text)\s+(.+?)\s+on\s+whatsapp\s+(?:saying|that says)\s+(.+)$",
+            text.strip(),
+            re.IGNORECASE,
+        )
+    if whatsapp_match:
+        return request_whatsapp_message(whatsapp_match.group(1), whatsapp_match.group(2))
 
     # Safety Tools & System Stats
     if any(p in t for p in ("system stats", "system status", "disk space", "storage space", "hardware stats")):
@@ -2140,7 +2223,14 @@ def session(q: queue.Queue, stt, brain: Brain) -> None:
 
         print("[Transcribing audio...]", flush=True)
         text = normalize_command_text(transcribe(stt, audio))
-        if text and is_noise_transcript(text, allow_short_replies=(pending_power_action is not None or awaiting_answer)):
+        if text and is_noise_transcript(
+            text,
+            allow_short_replies=(
+                pending_power_action is not None
+                or pending_whatsapp_message is not None
+                or awaiting_answer
+            ),
+        ):
             logger.info(f"Ignored noise transcript: {text!r}")
             text = ""
         if not text:
@@ -2208,15 +2298,20 @@ def session(q: queue.Queue, stt, brain: Brain) -> None:
             continue
 
         had_pending_power_action = pending_power_action is not None
+        had_pending_whatsapp_message = pending_whatsapp_message is not None
         power_confirmation = handle_power_confirmation(low)
-        if power_confirmation:
-            hud.set_transcript(jarvis=power_confirmation)
+        confirmation_reply = power_confirmation or handle_whatsapp_confirmation(low)
+        if confirmation_reply:
+            hud.set_transcript(jarvis=confirmation_reply)
             hud.set_state("SPEAKING")
-            speak(power_confirmation, block=True)
+            speak(confirmation_reply, block=True)
             hud.set_state("STANDBY")
             time.sleep(0.4)
             drain(q)
-            if had_pending_power_action and pending_power_action is None:
+            if (
+                (had_pending_power_action and pending_power_action is None)
+                or (had_pending_whatsapp_message and pending_whatsapp_message is None)
+            ):
                 return
             follow_up = True
             continue
