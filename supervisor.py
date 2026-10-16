@@ -32,9 +32,13 @@ if not logger.handlers:
 
 is_gui_mode = "pythonw" in sys.executable.lower()
 if is_gui_mode:
-    VENV_PYTHON = os.path.join(BASE_DIR, "venv", "Scripts", "pythonw.exe")
+    VENV_PYTHON = os.path.join(BASE_DIR, ".venv", "Scripts", "pythonw.exe")
+    if not os.path.exists(VENV_PYTHON):
+        VENV_PYTHON = os.path.join(BASE_DIR, "venv", "Scripts", "pythonw.exe")
 else:
-    VENV_PYTHON = os.path.join(BASE_DIR, "venv", "Scripts", "python.exe")
+    VENV_PYTHON = os.path.join(BASE_DIR, ".venv", "Scripts", "python.exe")
+    if not os.path.exists(VENV_PYTHON):
+        VENV_PYTHON = os.path.join(BASE_DIR, "venv", "Scripts", "python.exe")
 
 if not os.path.exists(VENV_PYTHON):
     VENV_PYTHON = sys.executable

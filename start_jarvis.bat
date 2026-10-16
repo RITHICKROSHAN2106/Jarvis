@@ -5,7 +5,9 @@ cd /d "%JARVIS_DIR%"
 echo ==============================================
 echo        JARVIS Voice Assistant Console
 echo ==============================================
-if exist "%JARVIS_DIR%venv\Scripts\python.exe" (
+if exist "%JARVIS_DIR%.venv\Scripts\python.exe" (
+	set "JARVIS_PYTHON=%JARVIS_DIR%.venv\Scripts\python.exe"
+) else if exist "%JARVIS_DIR%venv\Scripts\python.exe" (
 	set "JARVIS_PYTHON=%JARVIS_DIR%venv\Scripts\python.exe"
 ) else if exist "%JARVIS_DIR%..\venv\Scripts\python.exe" (
 	set "JARVIS_PYTHON=%JARVIS_DIR%..\venv\Scripts\python.exe"

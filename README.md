@@ -103,8 +103,8 @@ A lightweight, frameless, semi-transparent (`alpha = 0.92`) Tkinter desktop widg
    * Automatically restarts the assistant if an unhandled termination occurs, logging to [`logs/supervisor.log`](file:///c:/Users/HRITIK/Desktop/jarvis/logs/supervisor.log).
 2. **Logon Startup Integration ([`scripts/install_startup.ps1`](file:///c:/Users/HRITIK/Desktop/jarvis/scripts/install_startup.ps1))**:
    * Installs `JARVIS.lnk` into the user's Windows Startup folder (`shell:startup`).
-   * On logon, launches [`start_jarvis.vbs`](file:///c:/Users/HRITIK/Desktop/jarvis/start_jarvis.vbs), which waits 3 seconds for audio drivers to initialize, then starts `supervisor.py` silently in the background.
-   * Greeted on desktop with a time-aware personalized welcome:
+   * On logon, launches [`start_jarvis.vbs`](file:///c:/Users/HRITIK/Desktop/jarvis/start_jarvis.vbs), which waits 3 seconds for audio drivers to initialize, selects the project `.venv`, then starts `supervisor.py` silently in the background.
+   * The startup-launched instance enables the time-aware personalized welcome on logon and workstation wake; direct manual launches remain quiet unless `JARVIS_AUTO_GREETING=1` is set.
      > *"Good [morning/afternoon/evening], boss. Welcome back, Tony Stark. All systems are online and fully operational."*
 
 ---
